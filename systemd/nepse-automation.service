@@ -1,0 +1,17 @@
+[Unit]
+Description=NEPSE Automated Revenue & Content Infrastructure Daemon
+After=network.target ollama.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/nepse-faceless-automation
+ExecStart=/root/nepse-faceless-automation/venv/bin/python scheduler.py
+Restart=always
+RestartSec=15
+EnvironmentFile=-/root/nepse-faceless-automation/.env
+StandardOutput=append:/root/nepse-faceless-automation/logs/daemon.log
+StandardError=append:/root/nepse-faceless-automation/logs/daemon_error.log
+
+[Install]
+WantedBy=multi-user.target

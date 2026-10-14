@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Faceless Content Generator & Video Auto-Renderer
+Faceless Content Generator, Video Auto-Renderer & Social Publisher
 Queries local Ollama (qwen3-coder:30b) to draft viral 30-second short-form financial scripts,
 synthesizes neural TTS audio, renders an animated 9:16 vertical MP4 video via MoviePy,
-syncs assets directly to Google Drive via rclone, and automatically purges local staging files.
+publishes directly to YouTube Shorts (with Telegram CTA & Affiliate links),
+syncs assets to Google Drive via rclone, and automatically purges local staging files.
 """
 
 import os
@@ -21,27 +22,23 @@ import requests
 
 from faceless_content.tts_engine import synthesize_speech, split_text_into_subtitles
 from faceless_content.video_renderer import render_short_video
+from faceless_content.youtube_publisher import publish_short_video
 
 # -----------------------------------------------------------------------------
 # Configuration & Constants
 # -----------------------------------------------------------------------------
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen3-coder:30b")
-REQUEST_TIMEOUT = 300  # 300-second robust timeout
+REQUEST_TIMEOUT = 300
 DEFAULT_RCLONE_REMOTE = os.getenv("RCLONE_CONTENT_REMOTE", "gdrive:FacelessContent/")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = SCRIPT_DIR / "output"
 
-# -----------------------------------------------------------------------------
-# Logging Setup
-# -----------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("content_generator")
 
@@ -56,9 +53,6 @@ def query_ollama(
     url: str = OLLAMA_URL,
     timeout: int = REQUEST_TIMEOUT,
 ) -> str:
-    """
-    Sends a script generation request to the local Ollama instance with a 300s timeout.
-    """
     payload = {
         "model": model,
         "prompt": prompt,
@@ -80,7 +74,7 @@ def query_ollama(
         if not generated_text:
             raise ValueError("Ollama returned an empty response.")
 
-        logger.info(f"Successfully generated script ({len(generated_text)} characters).")
+        logger.info(f"Generated script ({len(generated_text)} characters).")
         return generated_text
 
     except requests.exceptions.Timeout:
@@ -94,9 +88,6 @@ def query_ollama(
         raise
 
 
-# -----------------------------------------------------------------------------
-# Prompt Engineering & Extraction
-# -----------------------------------------------------------------------------
 def build_script_prompt(topic: Optional[str] = None, market_context: Optional[str] = None) -> str:
     active_topic = topic or "Why 90% of NEPSE retail traders buy at the top and panic sell at the bottom"
     context_str = market_context or "Recent NEPSE turnover surge, sector rotation into Hydropower and Non-Life Insurance, key resistance at 2800."
@@ -150,16 +141,11 @@ def build_system_instruction() -> str:
 
 
 def extract_voiceover_lines(script_text: str) -> str:
-    """
-    Parses the script output to extract the spoken voiceover dialogue for TTS synthesis.
-    """
     voiceover_lines = []
     for line in script_text.splitlines():
-        # Match lines like "Voiceover: ..." or "- Voiceover: ..."
         match = re.search(r"Voiceover:\s*(.+)", line, re.IGNORECASE)
         if match:
             clean_text = match.group(1).strip().strip('"').strip("'")
-            # Strip bracketed remarks like [Aggressive tone]
             clean_text = re.sub(r"\[.*?\]", "", clean_text).strip()
             if clean_text:
                 voiceover_lines.append(clean_text)
@@ -167,7 +153,6 @@ def extract_voiceover_lines(script_text: str) -> str:
     if voiceover_lines:
         return " ".join(voiceover_lines)
 
-    # Fallback: if format deviated, extract readable non-metadata lines
     filtered = []
     for line in script_text.splitlines():
         if any(tag in line.lower() for tag in ["visual:", "text overlay:", "manifest", "http", "#"]):
@@ -182,44 +167,19 @@ def extract_voiceover_lines(script_text: str) -> str:
 # -----------------------------------------------------------------------------
 # File Staging & Rclone Synchronization
 # -----------------------------------------------------------------------------
-def sync_assets_to_remote(
-    staged_files: List[Path],
-    remote_destination: str = DEFAULT_RCLONE_REMOTE,
-) -> bool:
-    """
-    Syncs generated scripts, audio, and MP4 videos to Google Drive via rclone.
-    Immediately deletes local files upon successful sync to free disk space on L4 server.
-    """
-    logger.info(f"Initiating rclone sync for {len(staged_files)} file(s) to '{remote_destination}'...")
-
+def sync_assets_to_remote(staged_files: List[Path], remote_destination: str = DEFAULT_RCLONE_REMOTE) -> bool:
+    logger.info(f"Syncing {len(staged_files)} file(s) to '{remote_destination}'...")
     for file_path in staged_files:
         if not file_path.exists():
             continue
-
         cmd = ["rclone", "copy", str(file_path), remote_destination]
         try:
-            logger.info(f"Syncing: {file_path.name} -> {remote_destination}")
-            subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True,
-            )
-            # Immediate cleanup to save disk space
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
             file_path.unlink()
-            logger.info(f"Successfully uploaded and cleaned up local staging file: {file_path.name}")
-
-        except subprocess.CalledProcessError as cpe:
-            logger.error(f"Failed to sync {file_path.name}. Return code: {cpe.returncode}")
-            logger.error(f"rclone error output: {cpe.stderr.strip()}")
-            logger.warning(f"Preserving local file {file_path} for retry.")
+            logger.info(f"Uploaded and cleaned up staging file: {file_path.name}")
+        except Exception as e:
+            logger.error(f"Failed to sync {file_path.name}: {e}")
             raise
-        except FileNotFoundError:
-            logger.error("rclone executable not found. Please ensure rclone is in your PATH.")
-            logger.warning(f"Preserving local file {file_path}.")
-            raise
-
     return True
 
 
@@ -233,24 +193,24 @@ def run_generator(
     model: str = DEFAULT_MODEL,
     skip_rclone: bool = False,
     skip_video: bool = False,
+    skip_youtube: bool = False,
 ) -> Tuple[Path, Optional[Path]]:
     """
-    End-to-End Content Generation Pipeline:
-    1. Query Ollama for 30s Script
-    2. Extract Voiceover Dialogue
-    3. Synthesize Speech (Edge-TTS)
-    4. Render 9:16 Vertical MP4 Video (MoviePy + Pillow)
-    5. Sync all assets to Google Drive & Clean up local storage
+    1. Query Ollama for viral script
+    2. Synthesize speech (Edge-TTS)
+    3. Render 9:16 vertical video (MoviePy + Pillow)
+    4. Auto-publish to YouTube Shorts with Telegram CTA & affiliate links
+    5. Sync backup to Google Drive & purge local staging files
     """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    active_topic = topic or "Why 90% of NEPSE retail traders buy at the top"
 
-    # 1. Query Ollama for viral script
-    prompt = build_script_prompt(topic, context)
+    # 1. Query Ollama
+    prompt = build_script_prompt(active_topic, context)
     system_instruction = build_system_instruction()
     script_text = query_ollama(prompt, system_instruction, model=model)
 
-    # 2. Save script and manifest
     script_path = OUTPUT_DIR / f"faceless_script_{timestamp_str}.md"
     manifest_path = OUTPUT_DIR / f"faceless_manifest_{timestamp_str}.json"
 
@@ -259,7 +219,7 @@ def run_generator(
 
     manifest_data = {
         "timestamp": datetime.now().isoformat(),
-        "topic": topic or "NEPSE Market Strategy",
+        "topic": active_topic,
         "target_duration_seconds": 30,
         "format": "9:16_vertical_short",
         "resolution": "1080x1920",
@@ -269,17 +229,15 @@ def run_generator(
     staged_items = [script_path]
     video_path = None
 
-    # 3. Audio & Video Rendering
+    # 2. Speech & Video Render
     if not skip_video:
         try:
             voiceover_text = extract_voiceover_lines(script_text)
-            logger.info(f"Extracted Voiceover Text: \"{voiceover_text[:100]}...\"")
+            logger.info(f"Extracted Voiceover: \"{voiceover_text[:90]}...\"")
 
             audio_path = OUTPUT_DIR / f"voiceover_{timestamp_str}.mp3"
             synthesize_speech(voiceover_text, audio_path)
 
-            # Build dynamic subtitles
-            import wave
             try:
                 from moviepy.editor import AudioFileClip
                 a_clip = AudioFileClip(str(audio_path))
@@ -295,37 +253,43 @@ def run_generator(
             render_short_video(audio_path, subtitles, video_path)
 
             staged_items.append(audio_path)
-            staged_items.append(video_path)
             manifest_data["video_file"] = video_path.name
             manifest_data["audio_file"] = audio_path.name
 
+            # 3. Auto-Publish to YouTube Shorts
+            if not skip_youtube:
+                logger.info("Auto-publishing video to YouTube Shorts...")
+                yt_url = publish_short_video(video_path, topic=active_topic)
+                if yt_url:
+                    manifest_data["youtube_url"] = yt_url
+
+            staged_items.append(video_path)
+
         except Exception as ve:
-            logger.error(f"Video rendering encountered an issue: {ve}", exc_info=True)
-            logger.warning("Proceeding with script and manifest upload.")
+            logger.error(f"Video pipeline error: {ve}", exc_info=True)
 
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest_data, f, indent=2)
     staged_items.append(manifest_path)
 
-    # 4. Sync assets to Google Drive via rclone & Clean up local staging
+    # 4. Sync & Clean
     if not skip_rclone:
         sync_assets_to_remote(staged_items, remote_destination=remote_dest)
     else:
-        logger.info(f"[DRY-RUN/SKIP] Skipping rclone sync. Files preserved in {OUTPUT_DIR}")
+        logger.info(f"[DRY-RUN/SKIP] Skipping rclone sync. Files saved in {OUTPUT_DIR}")
 
     return script_path, video_path
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Faceless Content Generator: AI script & 9:16 MP4 video generator with Google Drive sync."
-    )
-    parser.add_argument("--topic", type=str, default=None, help="Custom topic for the video.")
-    parser.add_argument("--context", type=str, default=None, help="Additional market context.")
-    parser.add_argument("--remote", type=str, default=DEFAULT_RCLONE_REMOTE, help=f"rclone destination (default: {DEFAULT_RCLONE_REMOTE}).")
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help=f"Ollama model (default: {DEFAULT_MODEL}).")
-    parser.add_argument("--skip-video", action="store_true", help="Skip MP4 rendering (script only).")
-    parser.add_argument("--skip-rclone", action="store_true", help="Skip rclone upload (preserve staging files).")
+    parser = argparse.ArgumentParser(description="Faceless Content Generator & Social Auto-Publisher")
+    parser.add_argument("--topic", type=str, default=None)
+    parser.add_argument("--context", type=str, default=None)
+    parser.add_argument("--remote", type=str, default=DEFAULT_RCLONE_REMOTE)
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
+    parser.add_argument("--skip-video", action="store_true")
+    parser.add_argument("--skip-youtube", action="store_true")
+    parser.add_argument("--skip-rclone", action="store_true")
 
     args = parser.parse_args()
 
@@ -337,10 +301,11 @@ def main():
             model=args.model,
             skip_rclone=args.skip_rclone,
             skip_video=args.skip_video,
+            skip_youtube=args.skip_youtube,
         )
-        logger.info("Content Generation and Video Auto-Renderer workflow completed successfully.")
+        logger.info("Faceless Content Generator workflow completed successfully.")
     except Exception as exc:
-        logger.critical(f"Content generation failed: {exc}", exc_info=True)
+        logger.critical(f"Content generator failed: {exc}", exc_info=True)
         sys.exit(1)
 
 

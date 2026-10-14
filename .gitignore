@@ -6,6 +6,10 @@ secrets/
 *.pem
 *.key
 
+# Databases
+*.db
+*.sqlite3
+
 # Python
 __pycache__/
 *.py[cod]

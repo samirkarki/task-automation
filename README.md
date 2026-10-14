@@ -1,10 +1,11 @@
-# NEPSE Faceless Automation Infrastructure
+# NEPSE Automated Revenue & Content Infrastructure
 
-Production-ready automated financial data collection, lossless compression archive, quantitative stock analysis, AI-assisted trading suggestion engine, and viral Text-to-Speech (TTS) 9:16 vertical video auto-rendering pipeline deployed on **YetiCloud Nvidia L4 Server**.
+Autonomous, 24/7 revenue-generating infrastructure deployed on **YetiCloud Nvidia L4 Server**.
+Transforms data collection, technical quantitative finance, and local LLM/TTS video rendering into an automated **social media and paid VIP trading signal business**.
 
 ---
 
-## 🏛️ Comprehensive Architecture
+## 🏛️ End-to-End Monetization Architecture
 
 ```
                                 ┌─────────────────────────────────────────┐
@@ -26,31 +27,40 @@ Production-ready automated financial data collection, lossless compression archi
 │ 2. Quantitative Trading Engine       │              │             │   │
 │ - Indicators: RSI, SMA/EMA, BB, Vol  ├──────────────┘             │   │
 │ - Screening: Breakouts, Mean Revert  │ Structured Setups          │   │
-│ - AI Trading Advisory & Risk Mgmt    ├────────────────────────┐   │   │
-└──────────────────────────────────────┘                        │   │   │
-                                                                │   │   │
-┌──────────────────────────────────────┐                        │   │   │
-│ 3. Macro Market Trend Analyzer       ├────────────────────────┤   │   │
-│ - Executive summary & sector flows   │ Markdown Reports       │   │   │
-│ - Regulatory Disclaimer Guarantee    │                        │   │   │
-└──────────────────────────────────────┘                        │   │   │
-                                                                │   │   │
-┌──────────────────────────────────────┐                        │   │   │
-│ 4. Faceless Text-to-Video Pipeline   │                        │   │   │
-│ - Viral 30s Script Drafting (Ollama) ├────────────────────────┤   │   │
-│ - Neural TTS (Edge-TTS) Voiceover    │                        │   │   │
-│ - MoviePy + Pillow 9:16 MP4 Renderer │ MP4, Audio, Scripts    │   │   │
-│   (1080x1920, Animated Charts, Subs) │                        │   │   │
-└──────────────────┬───────────────────┘                        │   │   │
-                   │                                            │   │   │
-                   ▼                                            ▼   ▼   ▼
-       ┌───────────────────────────────┐               ┌───────────────────────────────┐
-       │   Local SSD Staging Area      │               │   Google Drive Remote         │
-       │   - nepse_bot/output/         ├──────────────►│   via rclone:                 │
-       │   - faceless_content/output/  │  rclone copy  │   - gdrive:NEPSE_Data/        │
-       │   (Purged upon sync success)  │               │   - gdrive:NEPSE_Reports/     │
-       └───────────────────────────────┘               │   - gdrive:FacelessContent/   │
-                                                       └───────────────────────────────┘
+│ - Win-Rate Performance Audit         ├──────────────┐             │   │
+└──────────────────┬───────────────────┘              │             │   │
+                   │                                  │             │   │
+                   ▼                                  ▼             │   │
+┌──────────────────────────────────────┐  ┌───────────────────────┐ │   │
+│ 3. Automated Telegram Broadcaster    │  │ 4. YouTube Shorts     │ │   │
+│ - Free Channel: Teasers & Pulse      │  │    Auto-Publisher     │ │   │
+│ - VIP Channel: High-Conviction Setups│  │ - 1080x1920 MP4 Video │ │   │
+│ - SQLite Subscriber Management       │  │ - Telegram CTA Link   │ │   │
+│ - Monetized: eSewa / Khalti Subs     │  │ - Demat Affiliate Link│ │   │
+└──────────────────────────────────────┘  └───────────────────────┘ │   │
+                                                                    │   │
+┌──────────────────────────────────────┐                            │   │
+│ 5. Macro Market Trend Analyzer       ├────────────────────────────┤   │
+│ - Executive summary & sector flows   │ Markdown Reports           │   │
+│ - Regulatory Disclaimer Guarantee    │                            │   │
+└──────────────────────────────────────┘                            │   │
+                                                                    │   │
+┌──────────────────────────────────────┐                            │   │
+│ 6. Faceless Text-to-Video Pipeline   │                            │   │
+│ - Viral 30s Script Drafting (Ollama) ├────────────────────────────┤   │
+│ - Neural TTS (Edge-TTS) Voiceover    │                            │   │
+│ - MoviePy + Pillow 9:16 MP4 Renderer │ MP4, Audio, Scripts        │   │
+│   (1080x1920, Animated Charts, Subs) │                            │   │
+└──────────────────┬───────────────────┘                            │   │
+                   │                                                │   │
+                   ▼                                                ▼   ▼   ▼
+       ┌───────────────────────────────┐                   ┌───────────────────────────────┐
+       │   Local SSD Staging Area      │                   │   Google Drive Remote         │
+       │   - nepse_bot/output/         ├──────────────────►│   via rclone:                 │
+       │   - faceless_content/output/  │    rclone copy    │   - gdrive:NEPSE_Data/        │
+       │   (Purged upon sync success)  │                   │   - gdrive:NEPSE_Reports/     │
+       └───────────────────────────────┘                   │   - gdrive:FacelessContent/   │
+                                                           └───────────────────────────────┘
 ```
 
 ---
@@ -59,98 +69,127 @@ Production-ready automated financial data collection, lossless compression archi
 
 ```
 nepse-faceless-automation/
-├── .gitignore                          # Staging outputs, venv, logs, secrets, and temp assets
-├── README.md                           # Complete architecture & deployment documentation
-├── requirements.txt                    # requests, pandas, numpy, matplotlib, moviepy, Pillow, edge-tts
-├── run.sh                              # Unified execution pipeline (executable mode 100755)
-├── nepse_bot/
+├── .env.example                        # Complete configuration template
+├── .gitignore                          # Excludes secrets, output staging, databases, venv
+├── README.md                           # Master infrastructure and deployment manual
+├── requirements.txt                    # requests, pandas, numpy, moviepy, edge-tts, google-api
+├── run.sh                              # Master execution script (single run or --daemon mode)
+├── scheduler.py                        # 24/7 autonomous daemon scheduling daily market tasks
+├── systemd/
+│   └── nepse-automation.service        # Production Linux systemd service configuration
+├── telegram_bot/
 │   ├── __init__.py
-│   ├── nepse_scraper.py                # Scrapes session data to CSV & builds lossless tar.gz archive
-│   ├── trading_engine.py               # Technical screening (RSI/SMA/BB/Vol) + Ollama AI trade setups
-│   ├── nepse_analyzer.py               # Orchestrator for scraper, trading engine & macro reports
-│   └── output/                         # Temporary staging (auto-cleaned upon sync)
+│   ├── bot_broadcaster.py              # Broadcasts Free teaser & VIP signal cards
+│   └── subscriber_manager.py           # SQLite database for VIP subscribers & eSewa/Khalti renewals
 ├── faceless_content/
 │   ├── __init__.py
-│   ├── tts_engine.py                   # Edge-TTS neural speech synthesis & subtitle timing
-│   ├── video_renderer.py               # MoviePy 1080x1920 MP4 vertical video renderer with dynamic subs
+│   ├── tts_engine.py                   # Neural speech synthesis with Edge-TTS & subtitles
+│   ├── video_renderer.py               # MoviePy 1080x1920 MP4 vertical video renderer
+│   ├── youtube_publisher.py            # YouTube Shorts auto-uploader with SEO & affiliate links
 │   ├── content_generator.py            # End-to-end script-to-video auto-publisher & rclone sync
 │   └── output/                         # Temporary staging (auto-cleaned upon sync)
-└── logs/                               # Timestamped execution logs
+├── nepse_bot/
+│   ├── __init__.py
+│   ├── nepse_scraper.py                # Session data scraper & lossless tar.gz archiver
+│   ├── trading_engine.py               # Technical indicator screening + Ollama AI trade setups
+│   ├── win_rate_tracker.py             # Persistent SQLite audit for win-rates & marketing proof
+│   ├── nepse_analyzer.py               # Orchestrator for scraper, trading engine & Telegram
+│   └── output/                         # Temporary staging (auto-cleaned upon sync)
+└── logs/                               # Execution and daemon logs
 ```
 
 ---
 
-## ⚙️ Prerequisites on YetiCloud Nvidia L4 Server
+## 💰 How This Infrastructure Generates Revenue
 
-### 1. Ollama & Qwen3-Coder
-Ensure Ollama is running on the Nvidia L4 GPU with `qwen3-coder:30b`:
+1. **VIP Paid Telegram Subscription Club (High Margin Recurring Income)**:
+   * Free channel receives daily morning briefs and teaser alerts with links to join VIP.
+   * VIP channel receives detailed trade cards (Entry, Target 1/2, Stop Loss, Risk/Reward).
+   * 100 members @ 1,000 NPR/month = **100,000 NPR/month** pure recurring profit via eSewa/Khalti.
+2. **Social Traffic & Affiliate Revenue**:
+   * YouTube Shorts videos auto-publish with pinned comments directing viewers to your free Telegram channel and broker TMS registration links.
+3. **Trade Win-Rate Proof**:
+   * `win_rate_tracker.py` audits closed trades against subsequent market sessions to calculate and publish verified win-rate scorecards (e.g. 82.5% accuracy), driving subscriber trust and conversions.
+
+---
+
+## ⚙️ Prerequisites Checklist on YetiCloud Nvidia L4 Server
+
+### 1. Ollama (`qwen3-coder:30b`)
 ```bash
 systemctl status ollama
 ollama pull qwen3-coder:30b
-ollama list
 ```
 
 ### 2. rclone Google Drive Remotes
-Ensure `rclone` is authenticated with Google Drive:
 ```bash
 rclone config
-# Confirm access
+# Confirm access:
 rclone lsd gdrive:
 ```
-The automated pipeline targets:
-- `gdrive:NEPSE_Data/`: Lossless compressed `.tar.gz` datasets (stock prices, sectoral indices, market summary).
-- `gdrive:NEPSE_Reports/`: Daily macro trend analysis reports and AI-assisted trading advisory reports.
-- `gdrive:FacelessContent/`: Rendered 1080x1920 `.mp4` video files, `.mp3` voiceovers, scripts, and JSON manifests.
+
+### 3. Environment Secrets Configuration (`.env`)
+Copy the template and plug in your keys:
+```bash
+cp .env.example .env
+nano .env
+```
+Key variables to set:
+* `TELEGRAM_BOT_TOKEN`: Token from [@BotFather](https://t.me/BotFather).
+* `TELEGRAM_FREE_CHANNEL_ID`: Your public Telegram channel (e.g., `@NepseAlphaFree`).
+* `TELEGRAM_VIP_CHANNEL_ID`: Your private VIP subscriber channel.
+* `TELEGRAM_FREE_INVITE_LINK`: Public invite link to join your channel.
+* `YOUTUBE_CLIENT_SECRETS_FILE`: Path to Google Cloud OAuth Desktop `client_secrets.json` (optional for live YouTube auto-upload).
 
 ---
 
-## 🚀 Execution & Usage
+## 🚀 Execution & 24/7 Autonomous Operation
 
-### 1. Run Complete Automated Infrastructure
-The master bash script navigates to the project directory, pulls the latest Git updates, activates the shared virtual environment, and runs both the NEPSE intelligence pipeline and the text-to-video renderer sequentially:
+### Option A: Run 24/7 as a Background Systemd Service (Recommended)
+This runs completely autonomously without needing terminal sessions:
+```bash
+# 1. Copy service file to systemd directory
+sudo cp systemd/nepse-automation.service /etc/systemd/system/
+
+# 2. Reload and start service
+sudo systemctl daemon-reload
+sudo systemctl enable --now nepse-automation
+
+# 3. Check status & live logs
+sudo systemctl status nepse-automation
+tail -f logs/daemon.log
+```
+
+### Option B: Run 24/7 via `./run.sh --daemon`
 ```bash
 chmod +x run.sh
+./run.sh --daemon
+```
+
+### Option C: Trigger a Single Immediate Pipeline Run
+```bash
 ./run.sh
 ```
 
-### 2. Standalone NEPSE Intelligence & Scraper
-```bash
-# Full scraping + lossless compression + trading analysis + macro report
-python nepse_bot/nepse_analyzer.py
-
-# Standalone Scraper & Lossless Archiver
-python nepse_bot/nepse_scraper.py --remote gdrive:NEPSE_Data/
-
-# Standalone AI Trading Suggestion Engine
-python nepse_bot/trading_engine.py --remote gdrive:NEPSE_Reports/
-```
-
-### 3. Standalone Faceless Text-to-Video Generator
-```bash
-# Full Script -> TTS Audio -> 1080x1920 MP4 Video -> Google Drive Sync
-python faceless_content/content_generator.py
-
-# Optional Flags:
-# --topic "Why Hydropower stocks are surging in NEPSE"
-# --skip-video    # Draft script & manifest only (skip MP4 render)
-# --skip-rclone   # Keep rendered video and audio in output/ for inspection
-```
-
 ---
 
-## ⏰ Cron Automation
-Schedule the entire automated pipeline to run every trading day after market close (Sunday to Thursday at 3:30 PM Nepal time):
-```bash
-crontab -e
-```
-Add:
-```cron
-30 15 * * 0-4 /bin/bash /path/to/nepse-faceless-automation/run.sh >> /path/to/nepse-faceless-automation/logs/cron.log 2>&1
-```
+## ⏰ Daily Autonomous Operating Schedule
+
+When running in daemon mode, the server executes automatically on trading days (Sunday to Thursday):
+
+| Time (NPT) | Automated Task | Distribution / Output |
+| :--- | :--- | :--- |
+| **10:45 AM** | Pre-Market Brief & Watchlist | Morning YouTube Short + Telegram update |
+| **12:30 PM** | Mid-Day Momentum Pulse | Free Telegram Channel Alert |
+| **03:30 PM** | Market Close Scrape + Lossless Archive | `gdrive:NEPSE_Data/` lossless tar.gz |
+| **03:35 PM** | Technical Screening + AI Trade Setups | VIP Telegram Channel Trade Cards |
+| **03:40 PM** | Macro Intelligence Report | `gdrive:NEPSE_Reports/` Markdown |
+| **03:45 PM** | 1080x1920 MP4 Video Auto-Render | YouTube Shorts Auto-Upload + `gdrive:FacelessContent/` |
+| **05:00 PM** | Win-Rate Performance Audit | Verified Win-Rate Scorecard to Telegram |
 
 ---
 
 ## 🔒 Compliance & Risk Management
-All reports and trading intelligence cards generated by the platform include the mandatory disclaimer:
+All reports, trade cards, and videos automatically include the mandatory disclaimer:
 > **"Automated data research only. Not financial advice."**
-All trading setups include explicit Stop-Loss invalidation levels and Risk-to-Reward parameters.
+Trade setups strictly calculate position invalidation levels to promote capital preservation.

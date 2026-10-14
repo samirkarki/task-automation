@@ -3,8 +3,10 @@
 # Automated Infrastructure Pipeline for YetiCloud Nvidia L4 Server
 # - Navigates to workspace directory
 # - Pulls latest git updates (origin main)
+# - Loads environment variables (.env)
 # - Activates / prepares shared virtual environment (venv/)
-# - Sequentially executes NEPSE Analyzer and Faceless Content Generator
+# - Sequentially executes NEPSE Intelligence & Faceless Content Pipelines
+# - Supports continuous daemon mode via: ./run.sh --daemon
 # =============================================================================
 
 set -eo pipefail
@@ -25,7 +27,7 @@ GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
 CYAN="\033[0;36m"
 RED="\033[0;31m"
-NC="\033[0m" # No Color
+NC="\033[0m"
 
 log_info() {
     local msg="[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $1"
@@ -55,27 +57,37 @@ log_error() {
     echo "$msg" >> "$LOG_FILE"
 }
 
-log_info "Starting Automated Pipeline in $PROJECT_DIR"
+log_info "Starting Automated Infrastructure Pipeline in $PROJECT_DIR"
 log_info "Writing detailed execution log to $LOG_FILE"
+
+# -----------------------------------------------------------------------------
+# 0. Load Environment Variables
+# -----------------------------------------------------------------------------
+if [ -f "$PROJECT_DIR/.env" ]; then
+    log_info "Loading configuration from .env..."
+    set -a
+    # shellcheck disable=SC1091
+    source "$PROJECT_DIR/.env"
+    set +a
+else
+    log_warn "No .env found. Using default environment variables (copy from .env.example)."
+fi
 
 # -----------------------------------------------------------------------------
 # 1. Pull Latest Code Updates
 # -----------------------------------------------------------------------------
 log_step "1/4: Pulling latest Git updates from origin/main..."
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-    # Only pull if remote origin is configured
     if git remote | grep -q "^origin$"; then
         log_info "Fetching and pulling latest changes from origin main..."
         if git pull origin main 2>&1 | tee -a "$LOG_FILE"; then
             log_info "Git pull completed successfully."
         else
-            log_warn "Git pull failed or branch diverged. Continuing with local workspace."
+            log_warn "Git pull encountered an issue. Continuing with local workspace."
         fi
     else
         log_warn "No 'origin' remote configured yet. Skipping git pull."
     fi
-else
-    log_warn "Not a git repository. Skipping git pull."
 fi
 
 # -----------------------------------------------------------------------------
@@ -89,13 +101,10 @@ if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR" 2>&1 | tee -a "$LOG_FILE"
 fi
 
-# Activate virtual environment
 if [ -f "$VENV_DIR/bin/activate" ]; then
-    # Linux / macOS environment (YetiCloud server)
     # shellcheck disable=SC1091
     source "$VENV_DIR/bin/activate"
 elif [ -f "$VENV_DIR/Scripts/activate" ]; then
-    # Windows Git Bash / WSL fallback
     # shellcheck disable=SC1091
     source "$VENV_DIR/Scripts/activate"
 else
@@ -112,22 +121,30 @@ if [ -f "$PROJECT_DIR/requirements.txt" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# 3. Execute NEPSE Market Trend Analyzer
+# Check for Daemon Mode
 # -----------------------------------------------------------------------------
-log_step "3/4: Running NEPSE Market Trend Analyzer (nepse_bot/nepse_analyzer.py)..."
+if [ "${1:-}" = "--daemon" ]; then
+    log_step "Starting Autonomous 24/7 Scheduler Daemon..."
+    exec python "$PROJECT_DIR/scheduler.py"
+fi
+
+# -----------------------------------------------------------------------------
+# 3. Execute NEPSE Intelligence, Scraper & Monetized Telegram Broadcaster
+# -----------------------------------------------------------------------------
+log_step "3/4: Running NEPSE Intelligence & Monetization Pipeline (nepse_bot/nepse_analyzer.py)..."
 if python "$PROJECT_DIR/nepse_bot/nepse_analyzer.py" 2>&1 | tee -a "$LOG_FILE"; then
-    log_info "NEPSE Market Trend Analyzer completed successfully."
+    log_info "NEPSE Intelligence & Monetization Pipeline completed successfully."
 else
-    log_error "NEPSE Market Trend Analyzer encountered an error."
+    log_error "NEPSE Intelligence Pipeline encountered an error."
     exit 1
 fi
 
 # -----------------------------------------------------------------------------
-# 4. Execute Faceless Content Generator
+# 4. Execute Faceless Content Generator & YouTube Shorts Auto-Publisher
 # -----------------------------------------------------------------------------
-log_step "4/4: Running Faceless Content Generator (faceless_content/content_generator.py)..."
+log_step "4/4: Running Faceless Content Generator & Social Publisher (faceless_content/content_generator.py)..."
 if python "$PROJECT_DIR/faceless_content/content_generator.py" 2>&1 | tee -a "$LOG_FILE"; then
-    log_info "Faceless Content Generator completed successfully."
+    log_info "Faceless Content Generator & Social Publisher completed successfully."
 else
     log_error "Faceless Content Generator encountered an error."
     exit 1
