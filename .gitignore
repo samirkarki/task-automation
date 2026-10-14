@@ -32,6 +32,10 @@ venv/
 ENV/
 env/
 
+# Logs
+*.log
+logs/
+
 # Node
 node_modules/
 npm-debug.log*
@@ -39,8 +43,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Output / Media files
+# Output / Media files & Staging
 output/
+nepse_bot/output/
+faceless_content/output/
 renders/
 temp/
 tmp/
