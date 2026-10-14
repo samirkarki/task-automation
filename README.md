@@ -1,32 +1,56 @@
 # NEPSE Faceless Automation Infrastructure
 
-Production-ready automated financial research analysis and viral short-form content generation pipeline deployed on **YetiCloud Nvidia L4 Server**.
+Production-ready automated financial data collection, lossless compression archive, quantitative stock analysis, AI-assisted trading suggestion engine, and viral Text-to-Speech (TTS) 9:16 vertical video auto-rendering pipeline deployed on **YetiCloud Nvidia L4 Server**.
 
 ---
 
-## 🏛️ Architecture Overview
+## 🏛️ Comprehensive Architecture
 
 ```
-                               ┌────────────────────────────────┐
-                               │  Local Ollama Instance         │
-                               │  Model: qwen3-coder:30b        │
-                               │  (Timeout: 300s, Port: 11434)  │
-                               └───────────────▲────────────────┘
-                                               │ HTTP POST
-                                               │
-┌──────────────────────┐      ┌────────────────┴───────────────┐      ┌───────────────────────────┐
-│                      │      │                                │      │                           │
-│  nepse_analyzer.py   ├─────►│  Local SSD Staging Area        ├─────►│  Google Drive Remote      │
-│  - Trend Analysis    │      │  - nepse_bot/output/           │      │  via rclone:              │
-│  - Markdown Report   │      │  - faceless_content/output/    │      │  - gdrive:NEPSE_Reports   │
-│  - Disclaimer Lock   │      │                                │      │  - gdrive:FacelessContent │
-│                      │      │  (Deleted immediately after    │      │                           │
-├──────────────────────┤      │   successful upload)           │      └───────────────────────────┘
-│                      │      │                                │
-│ content_generator.py ├─────►│                                │
-│  - 30s Viral Scripts │      │                                │
-│  - Manifest Metadata │      │                                │
-└──────────────────────┘      └────────────────────────────────┘
+                                ┌─────────────────────────────────────────┐
+                                │  Local Ollama Instance                  │
+                                │  Model: qwen3-coder:30b                 │
+                                │  (Timeout: 300s, Port: 11434)           │
+                                └───▲─────────────────▲─────────────────▲─┘
+                                    │                 │                 │
+                Prompt & Context ───┤                 │                 │
+                                    │                 │                 │
+┌───────────────────────────────────┴──┐              │                 │
+│ 1. NEPSE Scraper & Data Collector    │              │                 │
+│ - Live/Session Scraper (CSVs)        │              │                 │
+│ - Lossless tar.gz Compression        ├──────────────┼─────────────┐   │
+│ - Submits to gdrive:NEPSE_Data/      │              │             │   │
+└──────────────────┬───────────────────┘              │             │   │
+                   │ Tabular Data                     │             │   │
+┌──────────────────▼───────────────────┐              │             │   │
+│ 2. Quantitative Trading Engine       │              │             │   │
+│ - Indicators: RSI, SMA/EMA, BB, Vol  ├──────────────┘             │   │
+│ - Screening: Breakouts, Mean Revert  │ Structured Setups          │   │
+│ - AI Trading Advisory & Risk Mgmt    ├────────────────────────┐   │   │
+└──────────────────────────────────────┘                        │   │   │
+                                                                │   │   │
+┌──────────────────────────────────────┐                        │   │   │
+│ 3. Macro Market Trend Analyzer       ├────────────────────────┤   │   │
+│ - Executive summary & sector flows   │ Markdown Reports       │   │   │
+│ - Regulatory Disclaimer Guarantee    │                        │   │   │
+└──────────────────────────────────────┘                        │   │   │
+                                                                │   │   │
+┌──────────────────────────────────────┐                        │   │   │
+│ 4. Faceless Text-to-Video Pipeline   │                        │   │   │
+│ - Viral 30s Script Drafting (Ollama) ├────────────────────────┤   │   │
+│ - Neural TTS (Edge-TTS) Voiceover    │                        │   │   │
+│ - MoviePy + Pillow 9:16 MP4 Renderer │ MP4, Audio, Scripts    │   │   │
+│   (1080x1920, Animated Charts, Subs) │                        │   │   │
+└──────────────────┬───────────────────┘                        │   │   │
+                   │                                            │   │   │
+                   ▼                                            ▼   ▼   ▼
+       ┌───────────────────────────────┐               ┌───────────────────────────────┐
+       │   Local SSD Staging Area      │               │   Google Drive Remote         │
+       │   - nepse_bot/output/         ├──────────────►│   via rclone:                 │
+       │   - faceless_content/output/  │  rclone copy  │   - gdrive:NEPSE_Data/        │
+       │   (Purged upon sync success)  │               │   - gdrive:NEPSE_Reports/     │
+       └───────────────────────────────┘               │   - gdrive:FacelessContent/   │
+                                                       └───────────────────────────────┘
 ```
 
 ---
@@ -35,99 +59,87 @@ Production-ready automated financial research analysis and viral short-form cont
 
 ```
 nepse-faceless-automation/
-├── .gitignore                      # Ignore venv, logs, secrets, output staging
-├── README.md                       # Infrastructure & run guide
-├── requirements.txt                # requests, pandas, schedule, moviepy
-├── run.sh                          # Unified execution entrypoint (chmod +x)
+├── .gitignore                          # Staging outputs, venv, logs, secrets, and temp assets
+├── README.md                           # Complete architecture & deployment documentation
+├── requirements.txt                    # requests, pandas, numpy, matplotlib, moviepy, Pillow, edge-tts
+├── run.sh                              # Unified execution pipeline (executable mode 100755)
 ├── nepse_bot/
 │   ├── __init__.py
-│   ├── nepse_analyzer.py           # NEPSE market trend analysis & rclone sync
-│   └── output/                     # Temporary staging (auto-cleaned)
+│   ├── nepse_scraper.py                # Scrapes session data to CSV & builds lossless tar.gz archive
+│   ├── trading_engine.py               # Technical screening (RSI/SMA/BB/Vol) + Ollama AI trade setups
+│   ├── nepse_analyzer.py               # Orchestrator for scraper, trading engine & macro reports
+│   └── output/                         # Temporary staging (auto-cleaned upon sync)
 ├── faceless_content/
 │   ├── __init__.py
-│   ├── content_generator.py        # 30-second viral script generator & sync
-│   └── output/                     # Temporary staging (auto-cleaned)
-└── logs/                           # Automated pipeline execution logs
+│   ├── tts_engine.py                   # Edge-TTS neural speech synthesis & subtitle timing
+│   ├── video_renderer.py               # MoviePy 1080x1920 MP4 vertical video renderer with dynamic subs
+│   ├── content_generator.py            # End-to-end script-to-video auto-publisher & rclone sync
+│   └── output/                         # Temporary staging (auto-cleaned upon sync)
+└── logs/                               # Timestamped execution logs
 ```
 
 ---
 
 ## ⚙️ Prerequisites on YetiCloud Nvidia L4 Server
 
-### 1. Ollama & Model Pull
-Ensure Ollama is running and the `qwen3-coder:30b` model is loaded onto the Nvidia L4 GPU:
+### 1. Ollama & Qwen3-Coder
+Ensure Ollama is running on the Nvidia L4 GPU with `qwen3-coder:30b`:
 ```bash
-# Check if ollama service is active
 systemctl status ollama
-
-# Pull model (requires ~18GB VRAM on Nvidia L4)
 ollama pull qwen3-coder:30b
-
-# Verify
 ollama list
 ```
 
-### 2. rclone Configuration
-Ensure `rclone` has authenticated access to Google Drive:
+### 2. rclone Google Drive Remotes
+Ensure `rclone` is authenticated with Google Drive:
 ```bash
 rclone config
-# Configure remote named 'gdrive'
+# Confirm access
 rclone lsd gdrive:
 ```
-Required remotes:
-- `gdrive:NEPSE_Reports`
-- `gdrive:FacelessContent/`
+The automated pipeline targets:
+- `gdrive:NEPSE_Data/`: Lossless compressed `.tar.gz` datasets (stock prices, sectoral indices, market summary).
+- `gdrive:NEPSE_Reports/`: Daily macro trend analysis reports and AI-assisted trading advisory reports.
+- `gdrive:FacelessContent/`: Rendered 1080x1920 `.mp4` video files, `.mp3` voiceovers, scripts, and JSON manifests.
 
 ---
 
-## 🚀 Execution
+## 🚀 Execution & Usage
 
-### Run Full Pipeline via `run.sh`
-The root `run.sh` script handles everything:
-1. Navigates to project directory.
-2. Pulls latest updates (`git pull origin main`).
-3. Activates or sets up the shared virtual environment (`venv/`).
-4. Installs/updates dependencies (`requirements.txt`).
-5. Runs `nepse_analyzer.py` (queries Ollama, saves report, rclones to `gdrive:NEPSE_Reports`, deletes local copy).
-6. Runs `content_generator.py` (queries Ollama, drafts script + manifest, rclones to `gdrive:FacelessContent/`, deletes local copy).
-7. Writes timestamped execution logs to `logs/`.
-
+### 1. Run Complete Automated Infrastructure
+The master bash script navigates to the project directory, pulls the latest Git updates, activates the shared virtual environment, and runs both the NEPSE intelligence pipeline and the text-to-video renderer sequentially:
 ```bash
 chmod +x run.sh
 ./run.sh
 ```
 
----
-
-## 🛠️ Standalone Component Usage
-
-### 1. NEPSE Market Trend Analyzer
+### 2. Standalone NEPSE Intelligence & Scraper
 ```bash
-python nepse_bot/nepse_analyzer.py --help
+# Full scraping + lossless compression + trading analysis + macro report
+python nepse_bot/nepse_analyzer.py
 
-# Optional flags:
-# --input-file <path_to_json>   Pass custom session data (defaults to current snapshot)
-# --remote <rclone_dest>        Override default remote (gdrive:NEPSE_Reports)
-# --model <model_name>          Override model (default: qwen3-coder:30b)
-# --skip-rclone                 Preserve files locally without uploading (for testing)
+# Standalone Scraper & Lossless Archiver
+python nepse_bot/nepse_scraper.py --remote gdrive:NEPSE_Data/
+
+# Standalone AI Trading Suggestion Engine
+python nepse_bot/trading_engine.py --remote gdrive:NEPSE_Reports/
 ```
 
-### 2. Faceless Content Generator
+### 3. Standalone Faceless Text-to-Video Generator
 ```bash
-python faceless_content/content_generator.py --help
+# Full Script -> TTS Audio -> 1080x1920 MP4 Video -> Google Drive Sync
+python faceless_content/content_generator.py
 
-# Optional flags:
-# --topic "<topic>"             Custom video topic
-# --context "<context>"         Market context highlights
-# --remote <rclone_dest>        Override default remote (gdrive:FacelessContent/)
-# --model <model_name>          Override model (default: qwen3-coder:30b)
-# --skip-rclone                 Preserve files locally without uploading (for testing)
+# Optional Flags:
+# --topic "Why Hydropower stocks are surging in NEPSE"
+# --skip-video    # Draft script & manifest only (skip MP4 render)
+# --skip-rclone   # Keep rendered video and audio in output/ for inspection
 ```
 
 ---
 
-## ⏰ Cron Scheduling on Server
-To run automatically every trading day at 3:30 PM (after NEPSE market close):
+## ⏰ Cron Automation
+Schedule the entire automated pipeline to run every trading day after market close (Sunday to Thursday at 3:30 PM Nepal time):
 ```bash
 crontab -e
 ```
@@ -138,6 +150,7 @@ Add:
 
 ---
 
-## 🔒 Mandatory Compliance Note
-Every analysis report generated by `nepse_analyzer.py` automatically includes the mandatory regulatory disclaimer:
+## 🔒 Compliance & Risk Management
+All reports and trading intelligence cards generated by the platform include the mandatory disclaimer:
 > **"Automated data research only. Not financial advice."**
+All trading setups include explicit Stop-Loss invalidation levels and Risk-to-Reward parameters.
