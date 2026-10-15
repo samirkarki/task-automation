@@ -10,15 +10,15 @@ import sys
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 logger = logging.getLogger("tts_engine")
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-DEFAULT_VOICE = os.getenv("TTS_VOICE", "en-US-ChristopherNeural")
-DEFAULT_RATE = os.getenv("TTS_RATE", "+10%")  # Slightly faster for 30s viral pacing
+DEFAULT_VOICE = os.getenv("TTS_VOICE", "ne-NP-SagarNeural")
+DEFAULT_RATE = os.getenv("TTS_RATE", "+0%")  # Natural human conversational speed
 DEFAULT_PITCH = os.getenv("TTS_PITCH", "+0Hz")
 
 
@@ -51,9 +51,20 @@ def generate_speech_edge(
 ) -> Path:
     """
     Synchronous wrapper for generating speech via Edge-TTS.
+    Automatically switches to human Nepali neural voice if Devanagari script is detected.
     """
+    import re
+
+    # Auto-switch to human Nepali neural voice if Devanagari characters are present
+    if re.search(r"[\u0900-\u097F]", text) and not voice.startswith("ne-"):
+        logger.info(
+            f"Devanagari text detected. Auto-routing voice from '{voice}' to "
+            f"human Nepali neural voice 'ne-NP-SagarNeural'."
+        )
+        voice = "ne-NP-SagarNeural"
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Generating neural TTS with voice '{voice}' (rate={rate})...")
+    logger.info(f"Generating human neural TTS with voice '{voice}' (rate={rate}, pitch={pitch})...")
 
     try:
         # Run event loop
@@ -131,41 +142,75 @@ def synthesize_speech(
         return generate_fallback_silence_or_tone(text, output_path)
 
 
-def split_text_into_subtitles(text: str, total_duration: float) -> List[Dict[str, Any]]:
+def split_text_into_subtitles(
+    captions_or_text: Union[str, List[str]],
+    total_duration: float,
+) -> List[Dict[str, Any]]:
     """
-    Splits text into short bite-sized punchy phrases (3-6 words each)
-    and distributes them across the total duration for dynamic caption overlays.
+    Creates synchronized subtitle timeline for video overlays.
+    - If a list of English caption strings is provided, distributes them across total_duration.
+    - If a single string is provided, splits into short 3-5 word punchy chunks.
+    Proportionally allocates screen duration according to word count so viewers can comfortably read.
     """
     import re
-    # Clean spoken text, remove markdown cues and section headers
-    cleaned = re.sub(r"\[.*?\]", "", text)
-    cleaned = re.sub(r"\(.*?\)", "", cleaned)
-    cleaned = cleaned.replace("**", "").replace("#", "").strip()
 
-    sentences = [s.strip() for s in re.split(r"[.\n!?]+", cleaned) if s.strip()]
-    chunks = []
+    chunks: List[str] = []
 
-    for s in sentences:
-        words = s.split()
-        for i in range(0, len(words), 4):  # 4 words per visual subtitle card
-            chunk = " ".join(words[i:i+4])
-            if chunk:
-                chunks.append(chunk.upper())
+    if isinstance(captions_or_text, list):
+        for item in captions_or_text:
+            cleaned = str(item).strip().replace("**", "").replace("#", "")
+            cleaned = re.sub(r"\[.*?\]", "", cleaned)
+            cleaned = re.sub(r"\(.*?\)", "", cleaned).strip()
+            if cleaned:
+                chunks.append(cleaned.upper())
+    else:
+        text = str(captions_or_text)
+        cleaned = re.sub(r"\[.*?\]", "", text)
+        cleaned = re.sub(r"\(.*?\)", "", cleaned)
+        cleaned = cleaned.replace("**", "").replace("#", "").strip()
+
+        sentences = [s.strip() for s in re.split(r"[.\n!?]+", cleaned) if s.strip()]
+        for s in sentences:
+            words = s.split()
+            for i in range(0, len(words), 4):  # 4 words per visual subtitle card
+                chunk = " ".join(words[i : i + 4])
+                if chunk:
+                    chunks.append(chunk.upper())
 
     if not chunks:
-        chunks = ["NEPSE MARKET UPDATE", "SMART MONEY INSIGHT", "TRADE WITH DISCIPLINE"]
+        chunks = [
+            "NEPSE MARKET WARNING",
+            "RETAIL TRADERS TRAPPED AT 2800",
+            "SMART MONEY ACCUMULATION",
+            "SET YOUR STRICT STOPLOSS",
+            "TRADE WITH DISCIPLINE",
+        ]
 
-    chunk_duration = total_duration / len(chunks)
-    timeline = []
+    # Proportional screen timing based on word count
+    word_counts = [max(1, len(c.split())) for c in chunks]
+    total_words = sum(word_counts)
+
+    timeline: List[Dict[str, Any]] = []
     current_time = 0.0
 
-    for chunk in chunks:
-        timeline.append({
-            "text": chunk,
-            "start": round(current_time, 2),
-            "end": round(current_time + chunk_duration, 2),
-            "duration": round(chunk_duration, 2),
-        })
-        current_time += chunk_duration
+    for idx, chunk in enumerate(chunks):
+        if idx == len(chunks) - 1:
+            end_time = total_duration
+        else:
+            fraction = word_counts[idx] / total_words
+            card_dur = max(1.5, fraction * total_duration)
+            end_time = min(total_duration - 1.0, current_time + card_dur)
+
+        timeline.append(
+            {
+                "text": chunk,
+                "start": round(current_time, 2),
+                "end": round(end_time, 2),
+                "duration": round(max(0.2, end_time - current_time), 2),
+            }
+        )
+        current_time = end_time
+        if current_time >= total_duration:
+            break
 
     return timeline

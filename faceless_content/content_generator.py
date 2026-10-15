@@ -94,79 +94,140 @@ def query_ollama(
 
 
 def build_script_prompt(topic: Optional[str] = None, market_context: Optional[str] = None) -> str:
-    active_topic = topic or "Why 90% of NEPSE retail traders buy at the top and panic sell at the bottom"
+    active_topic = topic or "Why 90% of NEPSE retail traders buy at the 2800 top and panic sell at the bottom"
     context_str = market_context or "Recent NEPSE turnover surge, sector rotation into Hydropower and Non-Life Insurance, key resistance at 2800."
 
     prompt = f"""
-Write a high-retention, viral 30-second short-form video script (TikTok, YouTube Shorts, Instagram Reels) for a faceless financial channel focusing on the Nepal Stock Exchange (NEPSE).
+Write a high-retention, viral 30-second short-form video script (YouTube Shorts, TikTok, Instagram Reels) for a faceless financial intelligence channel focusing on the Nepal Stock Exchange (NEPSE).
 
 Topic: {active_topic}
 Market Context: {context_str}
 
-Format Requirements:
-- Exact Pacing: Total spoken words must be strictly between 65 to 80 words (approximately 28-32 seconds of rapid, clear speech).
-- Language: English (accessible, high-energy financial terminology).
-- Tone: Punchy, urgent, high-status, psychological, no fluff.
+CRITICAL DUAL-LANGUAGE REQUIREMENT:
+1. Spoken Voiceover MUST be in natural, conversational NEPALI language (Devanagari script).
+   - Tone: Energetic, authoritative, human, like an experienced Kathmandu financial analyst and trader.
+   - Pacing: Strictly 65 to 80 spoken Nepali words (28-32 seconds of clear, natural conversational cadence).
+   - Seamlessly integrate standard market terms (NEPSE, Stop Loss, RSI, Breakout, Broker, Target, Support, Resistance).
+2. On-screen Subtitles/Captions MUST be in punchy, high-impact ENGLISH (all caps, 3-5 words each).
+   - Viewers will LISTEN to human Nepali voiceover while READING dynamic English captions on screen!
 
 Structure the script into these explicit sections:
 
 1. [HOOK] (00:00 - 00:03)
-   - Visual: Aggressive zoom-in or striking visual text.
-   - Voiceover: [Write the exact 1-sentence hook here]
-   - Text Overlay: Bold 3-4 word curiosity trap.
+   - Visual: Aggressive zoom-in on red chart candles or index high.
+   - Voiceover (Nepali): [१ वाक्यको शक्तिशाली नेपाली हुक - जस्तै: "नेप्से २८०० पुग्दा फेरि साना लगानीकर्ता फस्ने निश्चित भयो?"]
+   - English Caption: [PUNCHY 3-5 WORD ENGLISH HOOK]
 
 2. [PROBLEM & TRAP] (00:03 - 00:12)
-   - Visual: Fast b-roll cues (red candles, panic selling).
-   - Voiceover: [Write the exact 2-sentence problem here]
-   - Text Overlay: Key emotional triggers.
+   - Visual: Fast panic selling b-roll, falling candles.
+   - Voiceover (Nepali): [२ वाक्यको समस्या र रिटेल ट्रयाप - जस्तै: "जब बजार टपमा पुग्छ, सामाजिक सञ्जालमा हल्ला चल्छ र रिटेल ट्रेडरहरू एफओएमओमा सेयर किन्छन्। तर स्मार्ट मनि यहाँ सेयर डम्प गरिरहेका छन्।"]
+   - English Caption: [2 SHORT PUNCHY ENGLISH CAPTION LINES]
 
-3. [THE INSIDER INSIGHT] (00:12 - 00:23)
-   - Visual: Green breakout charts, volume indicator spikes.
-   - Voiceover: [Write the exact 2-sentence insight here]
-   - Text Overlay: The actionable rule.
+3. [SMART MONEY INSIGHT] (00:12 - 00:23)
+   - Visual: Broker accumulation floorsheet, RSI divergence, green support line.
+   - Voiceover (Nepali): [२ वाक्यको संस्थागत रणनीति - जस्तै: "ठूला ब्रोकरहरूको एक्युमुलेसन हेर्नुहोस्। जबसम्म ब्रेकआउट भोल्युमले पुष्टि गर्दैन, नयाँ खरिद नगर्नुहोस् र स्टप लस कडाइका साथ राख्नुहोस्।"]
+   - English Caption: [2 SHORT PUNCHY ENGLISH CAPTION LINES]
 
 4. [CALL TO ACTION & OUTRO] (00:23 - 00:30)
-   - Visual: Follow animation / comment trigger.
-   - Voiceover: [Write the exact outro and question here]
-   - Text Overlay: "Save this before your next trade."
+   - Visual: Telegram VIP signal card and follow animation.
+   - Voiceover (Nepali): [१ वाक्यको निष्कर्ष र फलो गर्न आह्वान - जस्तै: "दैनिक नेप्से इन्टेलिजेन्स र हाई-विनरेट सिग्नलको लागि अहिले नै फलो र सेभ गर्नुहोस्।"]
+   - English Caption: [ENGLISH CALL TO ACTION CAPTION]
 
 5. [PRODUCTION ASSETS & B-ROLL MANIFEST]
-   - List 4 royalty-free B-roll keywords.
-   - Music vibe suggestion.
+   - List 4 B-roll keywords.
+   - Music vibe suggestion: Ambient cinematic suspense with modern pulse.
 """
     return prompt.strip()
 
 
 def build_system_instruction() -> str:
     return (
-        "You are an award-winning short-form video director and viral financial scriptwriter. "
-        "You master 30-second hooks, dopamine-driven storytelling, viewer retention curves, "
-        "and clean visual cue prompts for faceless video automation channels."
+        "You are an award-winning bilingual financial video director and NEPSE market analyst. "
+        "You craft viral short-form scripts where the spoken voiceover is authentic, conversational, "
+        "human-sounding Nepali (in Devanagari script), while the on-screen video captions are punchy, "
+        "high-impact English (3-5 words per line) for maximum engagement on TikTok and YouTube Shorts."
     )
 
 
-def extract_voiceover_lines(script_text: str) -> str:
-    voiceover_lines = []
-    for line in script_text.splitlines():
-        match = re.search(r"Voiceover:\s*(.+)", line, re.IGNORECASE)
-        if match:
-            clean_text = match.group(1).strip().strip('"').strip("'")
-            clean_text = re.sub(r"\[.*?\]", "", clean_text).strip()
-            if clean_text:
-                voiceover_lines.append(clean_text)
+def extract_voiceover_and_captions(script_text: str) -> Tuple[str, List[str]]:
+    """
+    Extracts:
+    1. nepali_voiceover: Spoken Nepali script in Devanagari for natural neural TTS.
+    2. english_captions: List of English subtitle cards for on-screen video overlay.
+    """
+    nepali_lines = []
+    english_caption_lines = []
 
-    if voiceover_lines:
-        return " ".join(voiceover_lines)
-
-    filtered = []
     for line in script_text.splitlines():
-        if any(tag in line.lower() for tag in ["visual:", "text overlay:", "manifest", "http", "#"]):
+        line_clean = line.strip()
+        if not line_clean:
             continue
-        line_clean = line.strip(" -*#")
-        if len(line_clean) > 20:
-            filtered.append(line_clean)
 
-    return " ".join(filtered[:5]) or "NEPSE index is testing major resistance. Smart money is quietly accumulating while retail panics. Manage your risk."
+        # Extract Voiceover lines (Nepali)
+        vo_match = re.search(
+            r"(?:Voiceover\s*(?:\(Nepali\)|\(ne\)|\bNepali\b)?|Nepali Voiceover|Voice-over):\s*(.+)",
+            line_clean,
+            re.IGNORECASE,
+        )
+        if vo_match:
+            text_cand = vo_match.group(1).strip().strip('"').strip("'")
+            text_cand = re.sub(r"\[.*?\]", "", text_cand).strip()
+            if text_cand:
+                nepali_lines.append(text_cand)
+            continue
+
+        # Extract English Captions / Subtitles
+        cap_match = re.search(
+            r"(?:English Caption|English Captions|Caption|Text Overlay|On-screen Text):\s*(.+)",
+            line_clean,
+            re.IGNORECASE,
+        )
+        if cap_match:
+            cap_cand = cap_match.group(1).strip().strip('"').strip("'")
+            cap_cand = re.sub(r"\[.*?\]", "", cap_cand).strip()
+            if cap_cand and not re.search(r"[\u0900-\u097F]", cap_cand):
+                english_caption_lines.append(cap_cand.upper())
+            continue
+
+    # Devanagari fallback extraction if no explicit Voiceover tag matched
+    if not nepali_lines:
+        for line in script_text.splitlines():
+            if any(tag in line.lower() for tag in ["visual:", "manifest", "http", "#", "production", "topic:"]):
+                continue
+            if re.search(r"[\u0900-\u097F]", line):
+                clean_dev = re.sub(r"^[0-9\.\-\*\#\s]+", "", line).strip().strip('"')
+                clean_dev = re.sub(r"\[.*?\]", "", clean_dev).strip()
+                if len(clean_dev) > 10:
+                    nepali_lines.append(clean_dev)
+
+    # Fallback default Nepali voiceover if empty
+    if not nepali_lines:
+        nepali_lines = [
+            "नेप्से परिसूचक २८०० को महत्त्वपूर्ण प्रतिरोध विन्दुमा पुगेको छ।",
+            "ठूला खेलाडी र स्मार्ट मनि आफ्नो नाफा सुरक्षित गर्दैछन्, तर साना लगानीकर्ताहरू भने एफओएमओमा फसेर टपमा सेयर किन्दैछन्।",
+            "यदि तपाईं बजारमा सुरक्षित नाफा कमाउन चाहनुहुन्छ भने स्टप लस कडाइका साथ पालना गर्नुहोस् र संस्थागत संकलन भएका स्क्रिप्टहरूमा मात्र ध्यान दिनुहोस्।",
+            "दैनिक नेप्से इन्टेलिजेन्सको लागि हाम्रो टेलिग्राम च्यानलमा जोडिनुहोस्।",
+        ]
+
+    # Fallback English captions if empty
+    if not english_caption_lines:
+        english_caption_lines = [
+            "NEPSE MARKET WARNING",
+            "RETAIL TRADERS TRAPPED AT 2800",
+            "SMART MONEY IS DUMPING",
+            "TRACK INSTITUTIONAL FLOWS",
+            "SET YOUR STRICT STOPLOSS",
+            "FOLLOW FOR VIP SIGNALS",
+        ]
+
+    voiceover_text = " ".join(nepali_lines)
+    return voiceover_text, english_caption_lines
+
+
+def extract_voiceover_lines(script_text: str) -> str:
+    """Backward-compatible helper returning the spoken voiceover string."""
+    vo, _ = extract_voiceover_and_captions(script_text)
+    return vo
 
 
 # -----------------------------------------------------------------------------
@@ -237,8 +298,9 @@ def run_generator(
     # 2. Speech & Video Render
     if not skip_video:
         try:
-            voiceover_text = extract_voiceover_lines(script_text)
-            logger.info(f"Extracted Voiceover: \"{voiceover_text[:90]}...\"")
+            voiceover_text, english_captions = extract_voiceover_and_captions(script_text)
+            logger.info(f"Extracted Nepali Voiceover: \"{voiceover_text[:90]}...\"")
+            logger.info(f"Extracted {len(english_captions)} English caption card(s) for on-screen subtitles.")
 
             audio_path = OUTPUT_DIR / f"voiceover_{timestamp_str}.mp3"
             synthesize_speech(voiceover_text, audio_path)
@@ -254,7 +316,8 @@ def run_generator(
             except Exception:
                 dur = 28.0
 
-            subtitles = split_text_into_subtitles(voiceover_text, total_duration=dur)
+            # On-screen subtitles rendered in English while voiceover speaks human Nepali
+            subtitles = split_text_into_subtitles(english_captions, total_duration=dur)
 
             # Render 9:16 MP4 Video
             video_path = OUTPUT_DIR / f"faceless_video_{timestamp_str}.mp4"
