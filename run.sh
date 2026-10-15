@@ -17,6 +17,7 @@ set -eo pipefail
 # -----------------------------------------------------------------------------
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
+export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
 
 echo "================================================================="
 echo "[$(date +'%Y-%m-%d %H:%M:%S')] [START] Starting run.sh in $PROJECT_DIR"
