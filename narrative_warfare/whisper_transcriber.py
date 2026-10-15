@@ -18,7 +18,7 @@ import sys
 import wave
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 
 logger = logging.getLogger("whisper_transcriber")
@@ -133,6 +133,42 @@ def group_words_into_kinetic_cards(
 
 
 # -----------------------------------------------------------------------------
+# Device & Precision Detection
+# -----------------------------------------------------------------------------
+def detect_whisper_device() -> Tuple[str, str]:
+    """
+    Detects the best available device ('cuda' or 'cpu') and compute precision.
+    Does not require PyTorch: queries CTranslate2 directly, or checks torch if installed.
+    Allows manual override via WHISPER_DEVICE env var ('cuda', 'cpu', 'auto').
+    """
+    forced_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
+    if forced_device in ("cuda", "gpu"):
+        return "cuda", "float16"
+    if forced_device == "cpu":
+        return "cpu", "int8"
+    if forced_device == "auto":
+        return "auto", "auto"
+
+    has_cuda = False
+    try:
+        import ctranslate2
+        has_cuda = ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        pass
+
+    if not has_cuda:
+        try:
+            import torch
+            has_cuda = bool(torch.cuda.is_available())
+        except Exception:
+            pass
+
+    if has_cuda:
+        return "cuda", "float16"
+    return "cpu", "int8"
+
+
+# -----------------------------------------------------------------------------
 # Faster-Whisper Extraction
 # -----------------------------------------------------------------------------
 def transcribe_with_faster_whisper(
@@ -142,6 +178,8 @@ def transcribe_with_faster_whisper(
 ) -> List[WordTimestamp]:
     """
     Transcribes audio using Faster-Whisper and extracts exact word-level millisecond timestamps.
+    Safely falls back to CPU if GPU/cuDNN execution fails, and returns an empty list on failure
+    so the pipeline gracefully proceeds with calibrated phonetic fallback.
     """
     try:
         from faster_whisper import WhisperModel
@@ -149,36 +187,50 @@ def transcribe_with_faster_whisper(
         logger.warning("faster-whisper is not installed in the active environment.")
         return []
 
-    logger.info(f"Loading Faster-Whisper model '{model_size}' for word-level kinetic alignment...")
-    
-    # Auto-detect CUDA availability
-    import torch
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    compute_type = "float16" if device == "cuda" else "int8"
-    
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
-    segments, info = model.transcribe(str(audio_path), word_timestamps=True, language="en")
+    device, compute_type = detect_whisper_device()
+    logger.info(f"Loading Faster-Whisper model '{model_size}' on device '{device}' ({compute_type})...")
 
-    cleaned_keywords = [k.upper().strip() for k in (emphasis_keywords or [])]
+    model = None
+    try:
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    except Exception as e:
+        if device != "cpu":
+            logger.warning(f"Failed to initialize Faster-Whisper on {device} ({e}). Retrying on CPU...")
+            try:
+                model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            except Exception as e_cpu:
+                logger.warning(f"Failed to load Faster-Whisper on CPU: {e_cpu}")
+                return []
+        else:
+            logger.warning(f"Failed to load Faster-Whisper model: {e}")
+            return []
 
-    word_records: List[WordTimestamp] = []
-    for segment in segments:
-        for w in segment.words:
-            clean_word = w.word.strip()
-            stripped_word = re.sub(r"[^\w]", "", clean_word).upper()
-            is_emp = any(k in stripped_word or stripped_word in k for k in cleaned_keywords) if stripped_word else False
-            word_records.append(
-                WordTimestamp(
-                    word=clean_word,
-                    start=round(w.start, 3),
-                    end=round(w.end, 3),
-                    probability=round(w.probability, 3),
-                    is_emphasis=is_emp,
+    try:
+        segments, info = model.transcribe(str(audio_path), word_timestamps=True, language="en")
+
+        cleaned_keywords = [k.upper().strip() for k in (emphasis_keywords or [])]
+
+        word_records: List[WordTimestamp] = []
+        for segment in segments:
+            for w in segment.words:
+                clean_word = w.word.strip()
+                stripped_word = re.sub(r"[^\w]", "", clean_word).upper()
+                is_emp = any(k in stripped_word or stripped_word in k for k in cleaned_keywords) if stripped_word else False
+                word_records.append(
+                    WordTimestamp(
+                        word=clean_word,
+                        start=round(w.start, 3),
+                        end=round(w.end, 3),
+                        probability=round(w.probability, 3),
+                        is_emphasis=is_emp,
+                    )
                 )
-            )
 
-    logger.info(f"Faster-Whisper transcribed {len(word_records)} words with exact millisecond timestamps.")
-    return word_records
+        logger.info(f"Faster-Whisper transcribed {len(word_records)} words with exact millisecond timestamps.")
+        return word_records
+    except Exception as e:
+        logger.warning(f"Faster-Whisper transcription failed during processing: {e}. Falling back to cadence algorithm.")
+        return []
 
 
 # -----------------------------------------------------------------------------
@@ -255,8 +307,15 @@ def generate_kinetic_subtitles(
     High-level entry point that returns kinetic subtitle cards with word-level
     millisecond timestamps and speech velocity scale factors.
     """
-    word_timestamps = transcribe_with_faster_whisper(audio_path, emphasis_keywords=emphasis_keywords)
+    word_timestamps: List[WordTimestamp] = []
+    try:
+        word_timestamps = transcribe_with_faster_whisper(audio_path, emphasis_keywords=emphasis_keywords)
+    except Exception as e:
+        logger.warning(f"Faster-Whisper encountered unexpected exception: {e}. Falling back to cadence algorithm.")
+        word_timestamps = []
+
     if not word_timestamps:
+        logger.info("Using calibrated fallback cadence alignment for kinetic subtitles.")
         word_timestamps = transcribe_fallback_cadence(spoken_text, audio_path, emphasis_keywords)
 
     return group_words_into_kinetic_cards(word_timestamps)
