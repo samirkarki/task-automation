@@ -101,12 +101,24 @@ def render_short_video(
     - Hormozi-style highlighted captions
     - Audio ducking with ambient bed
     """
-    from moviepy.editor import (
+    from faceless_content.moviepy_compat import (
         AudioFileClip,
         VideoClip,
         ImageClip,
         CompositeVideoClip,
+        is_moviepy_available,
+        set_clip_duration,
+        set_clip_fps,
+        set_clip_start,
+        set_clip_position,
+        set_clip_audio,
     )
+
+    if not is_moviepy_available():
+        raise RuntimeError(
+            "MoviePy is not installed in the active environment. "
+            "Please run: pip install -r requirements.txt"
+        )
 
     output_video_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -144,7 +156,8 @@ def render_short_video(
 
         return scene_arr
 
-    bg_clip = VideoClip(make_frame, duration=duration).set_fps(fps)
+    raw_bg_clip = VideoClip(make_frame, duration=duration)
+    bg_clip = set_clip_fps(raw_bg_clip, fps)
 
     # 3. Viral Word-Highlighted Subtitle Overlays
     subtitle_clips = []
@@ -157,18 +170,17 @@ def render_short_video(
         clip_dur = max(0.2, end_t - start_t)
 
         sub_img_np = create_viral_subtitle_card(text)
-        sub_clip = (
-            ImageClip(sub_img_np, ismask=False)
-            .set_start(start_t)
-            .set_duration(clip_dur)
-            .set_position(("center", sub_y_pos))
-        )
+        sub_clip = ImageClip(sub_img_np)
+        sub_clip = set_clip_start(sub_clip, start_t)
+        sub_clip = set_clip_duration(sub_clip, clip_dur)
+        sub_clip = set_clip_position(sub_clip, ("center", sub_y_pos))
         subtitle_clips.append(sub_clip)
 
     # 4. Composite Video & Attach Enhanced Audio
     logger.info(f"Compositing {len(subtitle_clips)} subtitle cards over 6 dynamic scenes...")
     video = CompositeVideoClip([bg_clip, *subtitle_clips], size=(VIDEO_WIDTH, VIDEO_HEIGHT))
-    video = video.set_audio(final_audio).set_duration(duration)
+    video = set_clip_audio(video, final_audio)
+    video = set_clip_duration(video, duration)
 
     # 5. Fast Encoding to MP4
     logger.info(f"Encoding final MP4 to {output_video_path}...")

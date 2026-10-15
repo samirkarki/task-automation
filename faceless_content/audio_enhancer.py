@@ -67,7 +67,17 @@ def compose_master_audio(voiceover_path: Path, output_master_path: Path) -> Path
     Loads voiceover audio, generates a synchronized ambient bed,
     and composites them into a balanced master audio track using MoviePy.
     """
-    from moviepy.editor import AudioFileClip, CompositeAudioClip
+    from faceless_content.moviepy_compat import (
+        AudioFileClip,
+        CompositeAudioClip,
+        scale_clip_volume,
+        is_moviepy_available,
+    )
+
+    if not is_moviepy_available():
+        raise RuntimeError(
+            "MoviePy is not installed. Please install dependencies via: pip install -r requirements.txt"
+        )
 
     output_master_path.parent.mkdir(parents=True, exist_ok=True)
     v_clip = AudioFileClip(str(voiceover_path))
@@ -76,10 +86,12 @@ def compose_master_audio(voiceover_path: Path, output_master_path: Path) -> Path
     # Synthesize background track matching exact voiceover duration
     temp_bg_path = output_master_path.parent / "temp_ambient_bed.wav"
     generate_cinematic_ambient_bed(duration, temp_bg_path)
-    bg_clip = AudioFileClip(str(temp_bg_path)).volumex(0.25)
+    bg_clip = AudioFileClip(str(temp_bg_path))
+    bg_clip_scaled = scale_clip_volume(bg_clip, 0.25)
+    v_clip_scaled = scale_clip_volume(v_clip, 1.0)
 
     # Master composite: Voiceover loud and prominent, ambient bed subtle
-    master = CompositeAudioClip([v_clip.volumex(1.0), bg_clip])
+    master = CompositeAudioClip([v_clip_scaled, bg_clip_scaled])
     master.write_audiofile(
         str(output_master_path),
         fps=44100,

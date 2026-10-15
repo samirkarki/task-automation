@@ -244,10 +244,13 @@ def run_generator(
             synthesize_speech(voiceover_text, audio_path)
 
             try:
-                from moviepy.editor import AudioFileClip
-                a_clip = AudioFileClip(str(audio_path))
-                dur = a_clip.duration
-                a_clip.close()
+                from faceless_content.moviepy_compat import AudioFileClip
+                if AudioFileClip is not None:
+                    a_clip = AudioFileClip(str(audio_path))
+                    dur = a_clip.duration
+                    a_clip.close()
+                else:
+                    dur = 28.0
             except Exception:
                 dur = 28.0
 

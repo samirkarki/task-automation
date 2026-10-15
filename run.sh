@@ -101,9 +101,15 @@ fi
 # 4. Virtual Environment Setup & Dependencies
 # -----------------------------------------------------------------------------
 log_step "Initializing Python virtual environment..."
-VENV_DIR="$PROJECT_DIR/venv"
-
-if [ ! -d "$VENV_DIR" ]; then
+if [ -n "${VENV_DIR:-}" ] && [ -d "$VENV_DIR" ]; then
+    log_info "Using configured virtual environment at $VENV_DIR..."
+elif [ -d "$PROJECT_DIR/venv" ]; then
+    VENV_DIR="$PROJECT_DIR/venv"
+elif [ -d "$HOME/server-automation/venv" ]; then
+    VENV_DIR="$HOME/server-automation/venv"
+    log_info "Auto-detected existing server virtual environment at $VENV_DIR..."
+else
+    VENV_DIR="$PROJECT_DIR/venv"
     log_info "Creating new virtual environment at $VENV_DIR..."
     python3 -m venv "$VENV_DIR" 2>&1 | tee -a "$LOG_FILE"
 fi
