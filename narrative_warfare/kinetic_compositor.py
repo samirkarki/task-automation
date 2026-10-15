@@ -29,6 +29,7 @@ from narrative_warfare.visual_generator import (
     render_scene_backdrop,
     get_system_font,
 )
+from narrative_warfare.media_director import get_cinematic_scene_backdrop
 from narrative_warfare.whisper_transcriber import SubtitleCard
 from faceless_content.moviepy_compat import (
     VideoClip,
@@ -155,6 +156,42 @@ def draw_kinetic_subtitle_card(
 
 
 # -----------------------------------------------------------------------------
+# High-Retention Visual Hook Badge
+# -----------------------------------------------------------------------------
+def draw_hook_badge(topic: str, palette: Dict[str, Any]) -> Image.Image:
+    """
+    Renders an elite, high-retention 'CONFIDENTIAL CASE STUDY' badge
+    overlaid at the top of the frame during the hook duration (first 3-5s).
+    Instantly stops feed-scrollers and establishes the investigative narrative context.
+    """
+    badge_img = Image.new("RGBA", (CANVAS_WIDTH, 260), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(badge_img)
+
+    hi_r, hi_g, hi_b = palette["highlight"]
+    acc_r, acc_g, acc_b = palette["accent"]
+
+    # Red confidential alert pill
+    tag_box = [60, 60, 520, 114]
+    draw.rounded_rectangle(tag_box, radius=8, fill=(185, 20, 20, 230), outline=(255, 60, 60, 255), width=2)
+    tag_font = get_system_font(size=25, bold=True)
+    draw.text((80, 72), "🔴 CONFIDENTIAL // CASE FILE", font=tag_font, fill=(255, 255, 255, 255))
+
+    # Bold topic headline
+    title_font = get_system_font(size=36, bold=True)
+    clean_topic = topic.strip().upper()
+    if len(clean_topic) > 36:
+        clean_topic = clean_topic[:33] + "..."
+    # Drop shadow
+    draw.text((66, 134), clean_topic, font=title_font, fill=(0, 0, 0, 230))
+    draw.text((64, 132), clean_topic, font=title_font, fill=(245, 248, 255, 255))
+
+    # Sleek bottom border
+    draw.line([(60, 192), (CANVAS_WIDTH - 60, 192)], fill=(acc_r, acc_g, acc_b, 200), width=3)
+
+    return badge_img
+
+
+# -----------------------------------------------------------------------------
 # Video Timeline & Scene Cut Manager
 # -----------------------------------------------------------------------------
 class VideoSceneManager:
@@ -183,10 +220,10 @@ class VideoSceneManager:
             {"name": "TAKEOVER", "start": t_s3, "end": total_duration + 0.5, "type": "TAKEOVER"},
         ]
 
-        # Pre-render base backdrops and assign random Ken Burns zoom rates [1.05x, 1.20x]
+        # Pre-render cinematic backdrops via Media Director and assign Ken Burns micro-motion
         self.scenes = []
         for cut in self.cuts:
-            bg_arr = render_scene_backdrop(cut["type"], palette, topic, seed)
+            bg_arr = get_cinematic_scene_backdrop(cut["type"], palette, topic, seed)
             zoom_rate = self.rng.uniform(1.06, 1.18)
             pan_x = self.rng.choice([-1.0, 0.0, 1.0])
             pan_y = self.rng.choice([-1.0, 0.0, 1.0])
@@ -253,11 +290,13 @@ def render_kinetic_short_video(
         seed=visual_seed,
     )
 
-    # Pre-cache subtitle card PIL images for fast composition
+    # Pre-cache subtitle card PIL images and hook badge for fast composition
     cached_cards = []
     for c in subtitle_cards:
         c_img = draw_kinetic_subtitle_card(c, palette)
         cached_cards.append((c.start, c.end, c_img))
+
+    cached_hook_badge = draw_hook_badge(topic, palette)
 
     logger.info(f"Rendering {total_duration:.1f}s vertical short (seed={visual_seed}, FPS={fps})...")
 
@@ -265,7 +304,11 @@ def render_kinetic_short_video(
         # 1. Base frame with dynamic Ken Burns
         frame_img = scene_manager.get_scene_frame(t).convert("RGBA")
 
-        # 2. Overlay active kinetic subtitle card (placed at Y = 1350)
+        # 2. Hook attention badge during the first 3-5 seconds
+        if t <= hook_duration:
+            frame_img.alpha_composite(cached_hook_badge, dest=(0, 0))
+
+        # 3. Overlay active kinetic subtitle card (placed at Y = 1320)
         for c_start, c_end, c_img in cached_cards:
             if c_start <= t < c_end:
                 frame_img.alpha_composite(c_img, dest=(0, 1320))
