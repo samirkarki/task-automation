@@ -1,21 +1,45 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Automated Infrastructure Pipeline for YetiCloud Nvidia L4 Server
-# - Navigates to workspace directory
-# - Pulls latest git updates (origin main)
-# - Loads environment variables (.env)
-# - Activates / prepares shared virtual environment (venv/)
-# - Sequentially executes NEPSE Intelligence & Faceless Content Pipelines
-# - Supports continuous daemon mode via: ./run.sh --daemon
+# Scheduled to run Monday - Friday at 11:00 PM (and on-demand)
+#
+# Execution Order:
+# 1. Immediate Git Pull from origin/main (First action when script starts)
+# 2. Setup logging & load configuration (.env)
+# 3. Initialize & activate Python virtual environment (venv/)
+# 4. Sequentially execute NEPSE Intelligence and Faceless Video Pipelines
 # =============================================================================
 
 set -eo pipefail
 
-# Determine repository root directory
+# -----------------------------------------------------------------------------
+# 1. IMMEDIATE GIT PULL (Always executed first upon startup)
+# -----------------------------------------------------------------------------
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
-# Ensure logs directory exists
+echo "================================================================="
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] [START] Starting run.sh in $PROJECT_DIR"
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] [GIT PULL] Executing 'git pull origin main' first..."
+echo "================================================================="
+
+if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    if git remote | grep -q "^origin$"; then
+        if git pull origin main; then
+            echo "[$(date +'%Y-%m-%d %H:%M:%S')] [GIT PULL] Successfully updated codebase from origin/main."
+        else
+            echo "[$(date +'%Y-%m-%d %H:%M:%S')] [WARN] 'git pull origin main' encountered an issue. Continuing with current local workspace."
+        fi
+    else
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] [WARN] No 'origin' remote configured yet. Skipping git pull."
+    fi
+else
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] [WARN] Not inside a git repository. Skipping git pull."
+fi
+
+# -----------------------------------------------------------------------------
+# 2. Logging Setup
+# -----------------------------------------------------------------------------
 LOGS_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOGS_DIR"
 
@@ -57,11 +81,10 @@ log_error() {
     echo "$msg" >> "$LOG_FILE"
 }
 
-log_info "Starting Automated Infrastructure Pipeline in $PROJECT_DIR"
-log_info "Writing detailed execution log to $LOG_FILE"
+log_info "Session log initialized at $LOG_FILE"
 
 # -----------------------------------------------------------------------------
-# 0. Load Environment Variables
+# 3. Load Environment Configuration
 # -----------------------------------------------------------------------------
 if [ -f "$PROJECT_DIR/.env" ]; then
     log_info "Loading configuration from .env..."
@@ -74,26 +97,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 1. Pull Latest Code Updates
+# 4. Virtual Environment Setup & Dependencies
 # -----------------------------------------------------------------------------
-log_step "1/4: Pulling latest Git updates from origin/main..."
-if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-    if git remote | grep -q "^origin$"; then
-        log_info "Fetching and pulling latest changes from origin main..."
-        if git pull origin main 2>&1 | tee -a "$LOG_FILE"; then
-            log_info "Git pull completed successfully."
-        else
-            log_warn "Git pull encountered an issue. Continuing with local workspace."
-        fi
-    else
-        log_warn "No 'origin' remote configured yet. Skipping git pull."
-    fi
-fi
-
-# -----------------------------------------------------------------------------
-# 2. Virtual Environment Setup & Dependencies
-# -----------------------------------------------------------------------------
-log_step "2/4: Initializing Python virtual environment..."
+log_step "Initializing Python virtual environment..."
 VENV_DIR="$PROJECT_DIR/venv"
 
 if [ ! -d "$VENV_DIR" ]; then
@@ -129,9 +135,9 @@ if [ "${1:-}" = "--daemon" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# 3. Execute NEPSE Intelligence, Scraper & Monetized Telegram Broadcaster
+# 5. Execute NEPSE Intelligence, Scraper & Monetized Telegram Broadcaster
 # -----------------------------------------------------------------------------
-log_step "3/4: Running NEPSE Intelligence & Monetization Pipeline (nepse_bot/nepse_analyzer.py)..."
+log_step "Running NEPSE Intelligence & Monetization Pipeline (nepse_bot/nepse_analyzer.py)..."
 if python "$PROJECT_DIR/nepse_bot/nepse_analyzer.py" 2>&1 | tee -a "$LOG_FILE"; then
     log_info "NEPSE Intelligence & Monetization Pipeline completed successfully."
 else
@@ -140,9 +146,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 4. Execute Faceless Content Generator & YouTube Shorts Auto-Publisher
+# 6. Execute Faceless Content Generator & YouTube Shorts Auto-Publisher
 # -----------------------------------------------------------------------------
-log_step "4/4: Running Faceless Content Generator & Social Publisher (faceless_content/content_generator.py)..."
+log_step "Running Faceless Content Generator & Social Publisher (faceless_content/content_generator.py)..."
 if python "$PROJECT_DIR/faceless_content/content_generator.py" 2>&1 | tee -a "$LOG_FILE"; then
     log_info "Faceless Content Generator & Social Publisher completed successfully."
 else
@@ -150,5 +156,5 @@ else
     exit 1
 fi
 
-log_step "Pipeline Execution Finished Successfully!"
-log_info "All tasks finished at $(date +'%Y-%m-%d %H:%M:%S'). Log saved: $LOG_FILE"
+log_step "Nightly Pipeline Execution Finished Successfully!"
+log_info "All tasks completed at $(date +'%Y-%m-%d %H:%M:%S'). Log saved: $LOG_FILE"

@@ -171,6 +171,16 @@ chmod +x run.sh
 ./run.sh
 ```
 
+### Option D: Nightly Crontab Schedule (Monday to Friday at 11:00 PM)
+To run the automated pipeline every weekday night at 11:00 PM (doing `git pull` first):
+```bash
+crontab -e
+```
+Add:
+```cron
+0 23 * * 1-5 /bin/bash /path/to/nepse-faceless-automation/run.sh >> /path/to/nepse-faceless-automation/logs/cron.log 2>&1
+```
+
 ---
 
 ## ⏰ Daily Autonomous Operating Schedule
