@@ -250,7 +250,7 @@ def run_generator(
 
             # Render 9:16 MP4 Video
             video_path = OUTPUT_DIR / f"faceless_video_{timestamp_str}.mp4"
-            render_short_video(audio_path, subtitles, video_path)
+            render_short_video(audio_path, subtitles, video_path, topic=active_topic)
 
             staged_items.append(audio_path)
             manifest_data["video_file"] = video_path.name
