@@ -126,6 +126,14 @@ if [ -f "$PROJECT_DIR/requirements.txt" ]; then
     python -m pip install --quiet -r "$PROJECT_DIR/requirements.txt" 2>&1 | tee -a "$LOG_FILE"
 fi
 
+# Verify multimedia rendering dependencies
+if ! command -v ffmpeg &> /dev/null; then
+    log_warn "ffmpeg is not found on system PATH! Video rendering requires ffmpeg."
+    log_warn "To install on YetiCloud (Ubuntu/Debian): sudo apt update && sudo apt install -y ffmpeg fonts-dejavu-core"
+else
+    log_info "ffmpeg binary detected: $(command -v ffmpeg)"
+fi
+
 # -----------------------------------------------------------------------------
 # Check for Daemon Mode
 # -----------------------------------------------------------------------------

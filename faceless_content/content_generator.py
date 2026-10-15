@@ -264,9 +264,18 @@ def run_generator(
                     manifest_data["youtube_url"] = yt_url
 
             staged_items.append(video_path)
+            manifest_data["video_status"] = "RENDERED_SUCCESSFULLY"
 
         except Exception as ve:
-            logger.error(f"Video pipeline error: {ve}", exc_info=True)
+            logger.error(f"[VIDEO RENDER ERROR] Failed to render short video: {ve}", exc_info=True)
+            logger.error(
+                "[TROUBLESHOOTING] Please verify on the YetiCloud server:\n"
+                "1. ffmpeg is installed: run 'sudo apt install -y ffmpeg'\n"
+                "2. Virtual environment has dependencies: run 'pip install -r requirements.txt'\n"
+                "3. Fonts are installed: run 'sudo apt install -y fonts-dejavu-core'"
+            )
+            manifest_data["video_status"] = "FAILED"
+            manifest_data["video_error"] = str(ve)
 
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest_data, f, indent=2)

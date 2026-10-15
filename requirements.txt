@@ -10,6 +10,7 @@ matplotlib>=3.7.0
 
 # Video Rendering & Speech Synthesis
 moviepy>=1.0.3
+imageio-ffmpeg>=0.4.9
 Pillow>=10.0.0
 edge-tts>=6.1.10
 
