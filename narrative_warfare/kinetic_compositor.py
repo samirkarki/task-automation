@@ -96,9 +96,25 @@ def draw_kinetic_subtitle_card(
     font = get_system_font(size=base_font_size, bold=True)
 
     words = card.words
+    if not words:
+        return card_img
+
+    base_font_size = int(58 * card.velocity_scale)
+    font = get_system_font(size=base_font_size, bold=True)
+
     space_w = draw.textlength(" ", font=font)
     word_widths = [draw.textlength(w.word, font=font) for w in words]
     total_text_w = sum(word_widths) + (len(words) - 1) * space_w
+
+    # Responsive auto-scaling: ensure card text and pill never overflow the 1080px canvas
+    max_text_w = CANVAS_WIDTH - 160  # 80px safe horizontal margin
+    if total_text_w > max_text_w and total_text_w > 0:
+        scale = max_text_w / total_text_w
+        base_font_size = max(28, int(base_font_size * scale))
+        font = get_system_font(size=base_font_size, bold=True)
+        space_w = draw.textlength(" ", font=font)
+        word_widths = [draw.textlength(w.word, font=font) for w in words]
+        total_text_w = sum(word_widths) + (len(words) - 1) * space_w
 
     center_x = CANVAS_WIDTH // 2
     center_y = 170
@@ -120,7 +136,7 @@ def draw_kinetic_subtitle_card(
     border_color = (hi_r, hi_g, hi_b, 240) if card.has_emphasis else (acc_r, acc_g, acc_b, 180)
     draw.rounded_rectangle(pill_box, radius=24, fill=(10, 14, 22, 225), outline=border_color, width=3)
 
-    # Word placement
+    # Word placement (anchor='lm' aligns left-to-right starting at center_x - half_w)
     curr_x = center_x - half_w
     for idx, w_obj in enumerate(words):
         # Color: Emphasis in Gold / Crimson / Highlight color; Standard in crisp white
@@ -130,9 +146,9 @@ def draw_kinetic_subtitle_card(
             text_color = (255, 255, 255, 255)
 
         # Drop shadow
-        draw.text((curr_x + 3, center_y + 3), w_obj.word, font=font, fill=(0, 0, 0, 240), anchor="mm")
+        draw.text((curr_x + 3, center_y + 3), w_obj.word, font=font, fill=(0, 0, 0, 240), anchor="lm")
         # Main text
-        draw.text((curr_x, center_y), w_obj.word, font=font, fill=text_color, anchor="mm")
+        draw.text((curr_x, center_y), w_obj.word, font=font, fill=text_color, anchor="lm")
         curr_x += word_widths[idx] + space_w
 
     return card_img
@@ -262,7 +278,7 @@ def render_kinetic_short_video(
     video_clip = set_clip_fps(video_clip, fps)
     video_clip = set_clip_audio(video_clip, audio_clip)
 
-    # Detect hardware acceleration or fallback
+    # Render video with high-efficiency H.264 encoding and resilient fallback
     write_kwargs = {
         "fps": fps,
         "codec": "libx264",
@@ -273,7 +289,19 @@ def render_kinetic_short_video(
         "logger": None,
     }
 
-    video_clip.write_videofile(str(output_video_path), **write_kwargs)
+    try:
+        video_clip.write_videofile(str(output_video_path), **write_kwargs)
+    except Exception as e:
+        logger.warning(f"Standard video encoding failed ({e}). Retrying with baseline compatibility parameters...")
+        video_clip.write_videofile(
+            str(output_video_path),
+            fps=fps,
+            codec="libx264",
+            audio_codec="aac",
+            preset="ultrafast",
+            threads=2,
+            logger=None,
+        )
 
     audio_clip.close()
     video_clip.close()
