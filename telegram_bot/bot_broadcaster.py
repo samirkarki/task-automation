@@ -136,21 +136,25 @@ def format_vip_trade_cards(setups: List[Dict[str, Any]]) -> str:
     for i, s in enumerate(setups, 1):
         sym = s.get("symbol", "N/A")
         sec = s.get("sector", "Equities")
-        strategy = s.get("strategy", "Momentum Breakout")
+        strategy = s.get("setup_type") or s.get("strategy", "Momentum Breakout")
+        grade = s.get("grade", "A Grade")
         entry = s.get("suggested_entry_range", "Current Market Price")
         target1 = s.get("target_1", 0.0)
         target2 = s.get("target_2", 0.0)
         stop = s.get("stop_loss", 0.0)
         rr = s.get("risk_reward_ratio", "1:2.0")
-        rsi = s.get("rsi_14", 50.0)
+        rsi = s.get("wilders_rsi_14") or s.get("rsi_14", 50.0)
+        top_buyer = s.get("top_buyer_broker", "Institutional Broker")
+        vol_surge = s.get("volume_surge", 1.0)
 
-        msg += f"<b>{i}. {sym}</b> ({sec})\n"
+        msg += f"<b>{i}. {sym}</b> ({sec}) | <b>{grade}</b>\n"
         msg += f"• <b>Strategy</b>: {strategy}\n"
         msg += f"• <b>Entry Zone</b>: <code>NPR {entry}</code>\n"
         msg += f"• <b>Target 1</b>: <code>NPR {target1}</code>\n"
         msg += f"• <b>Target 2 (Extended)</b>: <code>NPR {target2}</code>\n"
-        msg += f"• <b>Stop Loss</b>: <code>NPR {stop}</code>\n"
-        msg += f"• <b>Risk/Reward</b>: {rr} | <b>RSI(14)</b>: {rsi}\n\n"
+        msg += f"• <b>Stop Loss (ATR Invalidation)</b>: <code>NPR {stop}</code>\n"
+        msg += f"• <b>Risk/Reward</b>: {rr} | <b>Wilder RSI(14)</b>: {rsi}\n"
+        msg += f"• <b>Floorsheet Signal</b>: {top_buyer} accumulation (Vol: {vol_surge}x avg)\n\n"
 
     msg += (
         f"🛡️ <b>Risk Management Rule:</b> Never allocate more than 5-8% of total portfolio capital "
