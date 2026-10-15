@@ -44,7 +44,7 @@ logging.basicConfig(
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-DEFAULT_RCLONE_DATA_REMOTE = os.getenv("RCLONE_DATA_REMOTE", "gdrive:NEPSE_Data/")
+DEFAULT_RCLONE_DATA_REMOTE = os.getenv("RCLONE_DATA_REMOTE", "gdrive:TaskAutomation/nepse/data/")
 REQUEST_TIMEOUT = 25
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",

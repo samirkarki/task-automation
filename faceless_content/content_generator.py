@@ -35,7 +35,7 @@ from faceless_content.youtube_publisher import publish_short_video
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen3-coder:30b")
 REQUEST_TIMEOUT = 300
-DEFAULT_RCLONE_REMOTE = os.getenv("RCLONE_CONTENT_REMOTE", "gdrive:FacelessContent/")
+DEFAULT_RCLONE_REMOTE = os.getenv("RCLONE_CONTENT_REMOTE", "gdrive:TaskAutomation/faceless_content/")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = SCRIPT_DIR / "output"

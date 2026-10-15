@@ -66,6 +66,46 @@ logging.basicConfig(
 logger = logging.getLogger("premium_video_engine")
 
 OUTPUT_BASE_DIR = PROJECT_ROOT / "narrative_warfare" / "output"
+DEFAULT_RCLONE_REMOTE = os.getenv(
+    "RCLONE_WARFARE_REMOTE",
+    "gdrive:TaskAutomation/narrative-warfare/",
+)
+
+
+# -----------------------------------------------------------------------------
+# Google Drive Synchronization (rclone)
+# -----------------------------------------------------------------------------
+def sync_session_to_remote(
+    session_dir: Path,
+    remote_destination: str = DEFAULT_RCLONE_REMOTE,
+    purge_local: bool = False,
+) -> bool:
+    """
+    Syncs session assets (video, audio, manifests) to Google Drive via rclone.
+    Mirrors the cloud backup workflow used in faceless_content.
+    """
+    if not shutil.which("rclone"):
+        logger.warning("[RCLONE] rclone binary is not found on system PATH. Skipping Google Drive upload.")
+        return False
+
+    target_remote = f"{remote_destination.rstrip('/')}/{session_dir.name}"
+    logger.info(f"[RCLONE] Syncing session directory '{session_dir.name}' to '{target_remote}'...")
+    try:
+        cmd = ["rclone", "copy", str(session_dir), target_remote]
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        logger.info(f"[RCLONE] Successfully synced session to Google Drive: {target_remote}")
+
+        if purge_local:
+            logger.info(f"[RCLONE] Purging local files in {session_dir} to conserve disk space...")
+            shutil.rmtree(session_dir)
+
+        return True
+    except subprocess.CalledProcessError as cpe:
+        logger.error(f"[RCLONE ERROR] rclone failed: {cpe.stderr}")
+        return False
+    except Exception as e:
+        logger.error(f"[RCLONE ERROR] Exception during Google Drive sync: {e}")
+        return False
 
 
 # -----------------------------------------------------------------------------
@@ -80,6 +120,10 @@ class PremiumVideoPipeline:
         seed: Optional[int] = None,
         output_dir: Optional[Path] = None,
         dry_run: bool = False,
+        skip_youtube: bool = False,
+        skip_rclone: bool = False,
+        purge_local: bool = False,
+        remote_dest: Optional[str] = None,
         keep_staging: bool = False,
     ):
         self.topic = topic
@@ -87,6 +131,10 @@ class PremiumVideoPipeline:
         self.voice = voice
         self.seed = seed
         self.dry_run = dry_run
+        self.skip_youtube = skip_youtube
+        self.skip_rclone = skip_rclone
+        self.purge_local = purge_local
+        self.remote_dest = remote_dest or DEFAULT_RCLONE_REMOTE
         self.keep_staging = keep_staging
 
         # Initialize unique session run folder
@@ -252,12 +300,16 @@ class PremiumVideoPipeline:
             with open(payload_file, "w", encoding="utf-8") as f:
                 json.dump({"youtube": yt_payload, "tiktok": tt_payload}, f, indent=2)
 
-            upload_result = upload_to_youtube_with_disclosure(
-                video_path=final_mp4,
-                topic=script.topic,
-                hook=script.psychological_hook,
-                dry_run=True if self.dry_run else False,
-            )
+            if self.skip_youtube:
+                logger.info("[SKIP-YOUTUBE] Skipping live YouTube upload by user flag. Compliance metadata verified and saved.")
+                upload_result = "SKIPPED_BY_FLAG"
+            else:
+                upload_result = upload_to_youtube_with_disclosure(
+                    video_path=final_mp4,
+                    topic=script.topic,
+                    hook=script.psychological_hook,
+                    dry_run=True if self.dry_run else False,
+                )
 
             self.manifest["stages"]["stage6_disclosure"] = {
                 "status": "COMPLETED",
@@ -267,7 +319,29 @@ class PremiumVideoPipeline:
                 "payload_file": str(payload_file),
             }
 
-            # Clean temporary files if not requested to keep staging
+            # -----------------------------------------------------------------
+            # Stage 7: Google Drive Remote Cloud Sync (rclone)
+            # -----------------------------------------------------------------
+            if not self.skip_rclone and not self.dry_run:
+                logger.info("\n--- [STAGE 7/7] Google Drive Cloud Synchronization ---")
+                synced = sync_session_to_remote(
+                    session_dir=self.run_dir,
+                    remote_destination=self.remote_dest,
+                    purge_local=self.purge_local,
+                )
+                self.manifest["stages"]["stage7_rclone_sync"] = {
+                    "status": "COMPLETED" if synced else "SKIPPED_OR_FAILED",
+                    "remote_destination": self.remote_dest,
+                    "synced": synced,
+                }
+            else:
+                logger.info("\n[SKIP-RCLONE] Skipping Google Drive sync (flag set or dry-run). Assets preserved locally.")
+                self.manifest["stages"]["stage7_rclone_sync"] = {
+                    "status": "SKIPPED",
+                    "reason": "dry_run" if self.dry_run else "user_flag",
+                }
+
+            # Clean temporary staging files if not requested to keep staging
             if not self.keep_staging and not self.dry_run:
                 temp_files = list(self.run_dir.glob("temp_*"))
                 for tf in temp_files:
@@ -283,6 +357,8 @@ class PremiumVideoPipeline:
             logger.info("=================================================================")
             logger.info("Pipeline Execution Completed Successfully!")
             logger.info(f"Final 9:16 Video Asset: {final_mp4}")
+            if not self.skip_rclone and not self.dry_run:
+                logger.info(f"Google Drive Backup: {self.remote_dest.rstrip('/')}/{self.run_dir.name}")
             logger.info("=================================================================")
 
         except Exception as e:
@@ -332,6 +408,29 @@ def parse_arguments():
         help="4-digit visual style seed for deterministic color grading and vignette.",
     )
     parser.add_argument(
+        "--remote",
+        type=str,
+        default=DEFAULT_RCLONE_REMOTE,
+        help=f"rclone Google Drive destination remote (default: {DEFAULT_RCLONE_REMOTE}).",
+    )
+    parser.add_argument(
+        "--skip-rclone",
+        action="store_true",
+        help="Skip automatic rclone sync to Google Drive.",
+    )
+    parser.add_argument(
+        "--purge-local",
+        action="store_true",
+        help="Purge local video and audio files after successful Google Drive upload to save server disk.",
+    )
+    parser.add_argument(
+        "--skip-youtube",
+        "--skip-upload",
+        action="store_true",
+        dest="skip_youtube",
+        help="Render the full video and generate policy disclosures, but skip live YouTube upload.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Execute pipeline stages and validate payloads without heavy video encoding.",
@@ -359,6 +458,10 @@ def main():
         seed=args.seed,
         output_dir=args.output_dir,
         dry_run=args.dry_run,
+        skip_youtube=args.skip_youtube,
+        skip_rclone=args.skip_rclone,
+        purge_local=args.purge_local,
+        remote_dest=args.remote,
         keep_staging=args.keep_staging,
     )
     result = pipeline.execute()

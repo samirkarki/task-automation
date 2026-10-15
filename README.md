@@ -20,7 +20,7 @@ Transforms data collection, technical quantitative finance, and local LLM/TTS vi
 │ 1. NEPSE Scraper & Data Collector    │              │                 │
 │ - Live/Session Scraper (CSVs)        │              │                 │
 │ - Lossless tar.gz Compression        ├──────────────┼─────────────┐   │
-│ - Submits to gdrive:NEPSE_Data/      │              │             │   │
+│ - Submits to TaskAutomation/nepse/   │              │             │   │
 └──────────────────┬───────────────────┘              │             │   │
                    │ Tabular Data                     │             │   │
 ┌──────────────────▼───────────────────┐              │             │   │
@@ -46,21 +46,21 @@ Transforms data collection, technical quantitative finance, and local LLM/TTS vi
 └──────────────────────────────────────┘                            │   │
                                                                     │   │
 ┌──────────────────────────────────────┐                            │   │
-│ 6. Faceless Text-to-Video Pipeline   │                            │   │
-│ - Viral 30s Script Drafting (Ollama) ├────────────────────────────┤   │
-│ - Neural TTS (Edge-TTS) Voiceover    │                            │   │
-│ - MoviePy + Pillow 9:16 MP4 Renderer │ MP4, Audio, Scripts        │   │
+│ 6. Narrative & Faceless Engines      │                            │   │
+│ - Narrative Warfare 9:16 (Qwen/Kokoro├────────────────────────────┤   │
+│ - NEPSE Faceless Video (Edge-TTS)    │                            │   │
+│ - MoviePy + FFmpeg 9:16 MP4 Renderer │ MP4, Audio, Scripts        │   │
 │   (1080x1920, Animated Charts, Subs) │                            │   │
 └──────────────────┬───────────────────┘                            │   │
                    │                                                │   │
                    ▼                                                ▼   ▼   ▼
-       ┌───────────────────────────────┐                   ┌───────────────────────────────┐
-       │   Local SSD Staging Area      │                   │   Google Drive Remote         │
-       │   - nepse_bot/output/         ├──────────────────►│   via rclone:                 │
-       │   - faceless_content/output/  │    rclone copy    │   - gdrive:NEPSE_Data/        │
-       │   (Purged upon sync success)  │                   │   - gdrive:NEPSE_Reports/     │
-       └───────────────────────────────┘                   │   - gdrive:FacelessContent/   │
-                                                           └───────────────────────────────┘
+       ┌───────────────────────────────┐                   ┌──────────────────────────────────────────────┐
+       │   Local SSD Staging Area      │                   │   Google Drive Remote                        │
+       │   - nepse_bot/output/         ├──────────────────►│   via rclone (Parent: TaskAutomation/):      │
+       │   - faceless_content/output/  │    rclone copy    │   - gdrive:TaskAutomation/nepse/             │
+       │   - narrative_warfare/output/ │                   │   - gdrive:TaskAutomation/faceless_content/  │
+       │   (Purged upon sync success)  │                   │   - gdrive:TaskAutomation/narrative-warfare/ │
+       └───────────────────────────────┘                   └──────────────────────────────────────────────┘
 ```
 
 ---
@@ -191,10 +191,10 @@ When running in daemon mode, the server executes automatically on trading days (
 | :--- | :--- | :--- |
 | **10:45 AM** | Pre-Market Brief & Watchlist | Morning YouTube Short + Telegram update |
 | **12:30 PM** | Mid-Day Momentum Pulse | Free Telegram Channel Alert |
-| **03:30 PM** | Market Close Scrape + Lossless Archive | `gdrive:NEPSE_Data/` lossless tar.gz |
+| **03:30 PM** | Market Close Scrape + Lossless Archive | `gdrive:TaskAutomation/nepse/data/` lossless tar.gz |
 | **03:35 PM** | Technical Screening + AI Trade Setups | VIP Telegram Channel Trade Cards |
-| **03:40 PM** | Macro Intelligence Report | `gdrive:NEPSE_Reports/` Markdown |
-| **03:45 PM** | 1080x1920 MP4 Video Auto-Render | YouTube Shorts Auto-Upload + `gdrive:FacelessContent/` |
+| **03:40 PM** | Macro Intelligence Report | `gdrive:TaskAutomation/nepse/reports/` Markdown |
+| **03:45 PM** | 1080x1920 MP4 Video Auto-Render | YouTube Shorts Auto-Upload + `gdrive:TaskAutomation/faceless_content/` |
 | **05:00 PM** | Win-Rate Performance Audit | Verified Win-Rate Scorecard to Telegram |
 
 ---

@@ -44,7 +44,7 @@ logging.basicConfig(
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen3-coder:30b")
 REQUEST_TIMEOUT = 300
-DEFAULT_RCLONE_REPORT_REMOTE = os.getenv("RCLONE_NEPSE_REMOTE", "gdrive:NEPSE_Reports")
+DEFAULT_RCLONE_REPORT_REMOTE = os.getenv("RCLONE_NEPSE_REMOTE", "gdrive:TaskAutomation/nepse/reports/")
 MANDATORY_DISCLAIMER = "Automated data research only. Not financial advice."
 
 SCRIPT_DIR = Path(__file__).resolve().parent
