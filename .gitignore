@@ -51,6 +51,8 @@ yarn-error.log*
 output/
 nepse_bot/output/
 faceless_content/output/
+narrative_warfare/output/
+narrative_warfare/assets/cache/
 renders/
 temp/
 tmp/

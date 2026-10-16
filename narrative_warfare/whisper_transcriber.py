@@ -21,6 +21,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 
+from narrative_warfare.env_loader import load_project_env
+load_project_env()
+
 logger = logging.getLogger("whisper_transcriber")
 
 DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL_SIZE", "base")

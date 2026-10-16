@@ -22,6 +22,9 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from narrative_warfare.env_loader import load_project_env
+load_project_env()
+
 logger = logging.getLogger("voiceover_studio")
 
 # Default voice configurations

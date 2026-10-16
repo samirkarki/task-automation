@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Cinematic Media Director & Pluggable Scene Orchestrator
-Plans sentence-by-sentence visual beats (every 2.5-4.0s) and resolves
+Plans sentence-by-sentence visual beats (every 2.5-3.8s) and resolves
 visual assets (video clips / photorealistic images) across pluggable providers:
 - Pixabay (Live-action stock MP4 video clips & photos)
 - Local SDXL Turbo (PyTorch + Diffusers on Nvidia L4 GPU)
@@ -26,6 +26,11 @@ from typing import Dict, Any, Optional, List, Tuple
 import numpy as np
 from PIL import Image
 
+from narrative_warfare.env_loader import load_project_env
+
+# Guarantee environment variables from .env are loaded
+load_project_env()
+
 from narrative_warfare.visual_generator import CANVAS_WIDTH, CANVAS_HEIGHT
 from narrative_warfare.visual_providers import (
     visual_registry,
@@ -38,7 +43,7 @@ logger = logging.getLogger("media_director")
 
 @dataclass
 class VisualBeat:
-    """Represents a 2.5 - 4.0 second visual cut aligned with spoken speech."""
+    """Represents a 2.5 - 3.8 second visual cut aligned with spoken speech."""
     index: int
     start_time: float
     end_time: float
@@ -59,32 +64,32 @@ class VisualBeat:
 SEMANTIC_PATTERNS = [
     (
         r"\b(liquid|cash|flow|bankrupt|insolvent|money|fund|credit|debt)\b",
-        "financial stock chart terminal monitors",
+        "stock market",
         "cinematic photo of glowing financial trading screens in dark room, stock chart analysis, 35mm film",
     ),
     (
         r"\b(raider|hostile|takeover|predat|exploit|steal|starve|weapon)\b",
-        "corporate boardroom executive meeting glass",
+        "boardroom",
         "cinematic film still of shadowy businessman in glass penthouse office overlooking night city, volumetric smoke",
     ),
     (
         r"\b(desperat|stress|vulnerab|panic|poor decision|fear)\b",
-        "businessman stressed head in hands office",
+        "stressed businessman",
         "moody cinematic portrait of exhausted executive stressed at dark mahogany desk, dramatic rim lighting",
     ),
     (
         r"\b(warfare|calculat|strategy|strateg|chess|tactic|maneuver)\b",
-        "chessboard strategic pieces dramatic lighting",
+        "chess",
         "dramatic close up of wooden chess pieces with fallen king, cinematic noir shadow lighting",
     ),
     (
         r"\b(price|sell|asset|billion|million|shares|stock|equity)\b",
-        "bank vault gold bullion dramatic spotlight",
+        "bank vault",
         "cinematic photo of heavy steel bank vault with golden bars, dramatic spotlight, dark luxury finance thriller",
     ),
     (
         r"\b(executive|ceo|board|management|company|corporat)\b",
-        "modern corporate skyscraper glass architecture",
+        "skyscraper",
         "cinematic 8k shot of illuminated financial skyscraper tower at dusk, cold steel blue reflection",
     ),
 ]
@@ -104,12 +109,14 @@ def extract_contextual_visual_intent(text_snippet: str, index: int) -> Tuple[str
             pref = "video" if index % 2 == 0 else "image"
             return query, prompt, pref
 
-    # Default fallback queries
+    # Default fallback queries: curated high-yield tags with guaranteed stock hits
     defaults = [
-        ("Wall Street financial district night skyline", "cinematic aerial shot of illuminated financial district skyscrapers at night", "video"),
-        ("modern corporate boardroom conference table", "cinematic photo of empty luxury glass boardroom table at night, city lights", "image"),
-        ("stock exchange trading floor interior", "cinematic wide shot of stock market trading floor with glowing data monitors", "video"),
-        ("London Canary Wharf skyscrapers night", "dramatic shot of modern corporate skyscraper tower reflecting city lights", "image"),
+        ("skyscraper", "cinematic aerial shot of illuminated financial district skyscrapers at night", "video"),
+        ("boardroom", "cinematic photo of empty luxury glass boardroom table at night, city lights", "image"),
+        ("stock market", "cinematic wide shot of stock market trading floor with glowing data monitors", "video"),
+        ("city night", "dramatic shot of modern corporate skyscraper tower reflecting city lights", "image"),
+        ("trading", "close up of financial charts and numerical data flowing on multiple monitors", "video"),
+        ("businessman", "shadowy corporate executive standing in dark high rise office looking at city", "image"),
     ]
     query, prompt, pref = defaults[index % len(defaults)]
     return query, prompt, pref
@@ -122,11 +129,11 @@ def plan_visual_beats(
     spoken_text: str,
     total_duration: float,
     hook_duration: float = 3.5,
-    min_beat_duration: float = 2.8,
-    max_beat_duration: float = 4.2,
+    min_beat_duration: float = 2.5,
+    max_beat_duration: float = 3.8,
 ) -> List[VisualBeat]:
     """
-    Partitions continuous speech into dynamic, high-retention 2.5-4.0s visual beats
+    Partitions continuous speech into dynamic, high-retention 2.5-3.8s visual beats
     so the viewer sees a fresh, contextually matched visual every 3 seconds.
     """
     # Split text into sentences or major clauses
@@ -134,8 +141,8 @@ def plan_visual_beats(
     if not sentences:
         sentences = [spoken_text]
 
-    # Calculate optimal beat count
-    total_beats = max(3, int(round(total_duration / 3.4)))
+    # Calculate optimal beat count (target ~3.2s per visual cut for high retention)
+    total_beats = max(3, int(round(total_duration / 3.2)))
     ideal_beat_dur = total_duration / float(total_beats)
 
     beats: List[VisualBeat] = []

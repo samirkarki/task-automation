@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 
 import requests
 
+from narrative_warfare.env_loader import load_project_env
+load_project_env()
+
 logger = logging.getLogger("script_controller")
 
 DEFAULT_OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")

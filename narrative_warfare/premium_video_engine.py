@@ -29,6 +29,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from narrative_warfare.env_loader import load_project_env
+load_project_env()
+
 from narrative_warfare.script_controller import (
     NarrativeScript,
     generate_narrative_script,
