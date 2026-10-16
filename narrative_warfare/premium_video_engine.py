@@ -271,6 +271,7 @@ class PremiumVideoPipeline:
                     topic=script.topic,
                     visual_seed=script.visual_style_seed,
                     hook_duration=hook_duration,
+                    spoken_text=spoken_text,
                     fps=DEFAULT_FPS,
                 )
 

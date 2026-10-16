@@ -29,7 +29,11 @@ from narrative_warfare.visual_generator import (
     render_scene_backdrop,
     get_system_font,
 )
-from narrative_warfare.media_director import get_cinematic_scene_backdrop
+from narrative_warfare.media_director import (
+    plan_visual_beats,
+    resolve_all_beat_assets,
+    VisualBeat,
+)
 from narrative_warfare.whisper_transcriber import SubtitleCard
 from faceless_content.moviepy_compat import (
     VideoClip,
@@ -192,7 +196,7 @@ def draw_hook_badge(topic: str, palette: Dict[str, Any]) -> Image.Image:
 
 
 # -----------------------------------------------------------------------------
-# Video Timeline & Scene Cut Manager
+# Video Timeline & Scene Beat Manager (Multi-Beat Cross-Dissolve)
 # -----------------------------------------------------------------------------
 class VideoSceneManager:
     def __init__(
@@ -202,58 +206,95 @@ class VideoSceneManager:
         palette: Dict[str, Any],
         topic: str,
         seed: int,
+        spoken_text: str = "",
     ):
         self.total_duration = total_duration
         self.palette = palette
         self.rng = random.Random(seed)
 
-        # Build 4 scene cuts
-        t_hook = max(3.0, min(5.0, hook_duration))
-        remaining = max(10.0, total_duration - t_hook)
-        t_s2 = t_hook + remaining * 0.35
-        t_s3 = t_hook + remaining * 0.70
+        # 1. Plan high-retention visual beats (cuts every 2.8 - 4.0s)
+        self.beats = plan_visual_beats(spoken_text or topic, total_duration, hook_duration)
 
-        self.cuts = [
-            {"name": "HOOK", "start": 0.0, "end": t_hook, "type": "HOOK"},
-            {"name": "ANALYSIS", "start": t_hook, "end": t_s2, "type": "CHESSBOARD"},
-            {"name": "STRATEGY", "start": t_s2, "end": t_s3, "type": "ORDERBOOK"},
-            {"name": "TAKEOVER", "start": t_s3, "end": total_duration + 0.5, "type": "TAKEOVER"},
-        ]
+        # 2. Resolve assets across pluggable providers (Pixabay, Local SDXL, Wikimedia, etc.)
+        self.beats = resolve_all_beat_assets(self.beats, palette, seed)
 
-        # Pre-render cinematic backdrops via Media Director and assign Ken Burns micro-motion
+        # 3. Cache base frames and micro-motion vectors
         self.scenes = []
-        for cut in self.cuts:
-            bg_arr = get_cinematic_scene_backdrop(cut["type"], palette, topic, seed)
-            zoom_rate = self.rng.uniform(1.06, 1.18)
+        for beat in self.beats:
+            asset = beat.asset
+            zoom_rate = self.rng.uniform(1.05, 1.15)
             pan_x = self.rng.choice([-1.0, 0.0, 1.0])
             pan_y = self.rng.choice([-1.0, 0.0, 1.0])
+
+            base_img = None
+            if asset and asset.file_path.exists():
+                try:
+                    raw = Image.open(str(asset.file_path)).convert("RGB")
+                    base_img = self._crop_to_vertical(raw)
+                except Exception as e:
+                    logger.warning(f"Error loading image {asset.file_path}: {e}")
+
+            if base_img is None:
+                # Emergency procedural canvas
+                arr = render_scene_backdrop("HOOK", palette, topic, seed)
+                base_img = Image.fromarray(arr)
+
             self.scenes.append({
-                "meta": cut,
-                "base_img": Image.fromarray(bg_arr),
+                "beat": beat,
+                "base_img": base_img,
                 "zoom_rate": zoom_rate,
                 "pan_x": pan_x,
                 "pan_y": pan_y,
             })
 
-    def get_scene_frame(self, t: float) -> Image.Image:
-        # Find active scene
-        active_scene = self.scenes[-1]
-        for s in self.scenes:
-            if s["meta"]["start"] <= t < s["meta"]["end"]:
-                active_scene = s
-                break
+    def _crop_to_vertical(self, img: Image.Image) -> Image.Image:
+        w, h = img.size
+        target_ratio = CANVAS_WIDTH / CANVAS_HEIGHT
+        if (w / h) > target_ratio:
+            new_w = int(h * target_ratio)
+            left = (w - new_w) // 2
+            cropped = img.crop((left, 0, left + new_w, h))
+        else:
+            new_h = int(w / target_ratio)
+            top = (h - new_h) // 2
+            cropped = img.crop((0, top, w, top + new_h))
+        return cropped.resize((CANVAS_WIDTH, CANVAS_HEIGHT), Image.Resampling.BILINEAR)
 
-        scene_start = active_scene["meta"]["start"]
-        scene_dur = max(0.5, active_scene["meta"]["end"] - scene_start)
-        progress = np.clip((t - scene_start) / scene_dur, 0.0, 1.0)
+    def _sample_beat_frame(self, scene_dict: Dict[str, Any], t: float) -> Image.Image:
+        beat = scene_dict["beat"]
+        beat_start = beat.start_time
+        beat_dur = beat.duration
+        progress = np.clip((t - beat_start) / max(0.2, beat_dur), 0.0, 1.0)
 
         return get_ken_burns_crop(
-            active_scene["base_img"],
+            scene_dict["base_img"],
             progress=progress,
-            max_zoom=active_scene["zoom_rate"],
-            pan_dx=active_scene["pan_x"],
-            pan_dy=active_scene["pan_y"],
+            max_zoom=scene_dict["zoom_rate"],
+            pan_dx=scene_dict["pan_x"],
+            pan_dy=scene_dict["pan_y"],
         )
+
+    def get_scene_frame(self, t: float) -> Image.Image:
+        # Find active beat
+        active_idx = len(self.scenes) - 1
+        for idx, s in enumerate(self.scenes):
+            if s["beat"].start_time <= t < s["beat"].end_time:
+                active_idx = idx
+                break
+
+        curr_scene = self.scenes[active_idx]
+        curr_frame = self._sample_beat_frame(curr_scene, t)
+
+        # 0.35s buttery smooth cross-dissolve to eliminate black screens and sudden jumps
+        transition_dur = 0.35
+        rel_time = t - curr_scene["beat"].start_time
+        if rel_time < transition_dur and active_idx > 0:
+            prev_scene = self.scenes[active_idx - 1]
+            prev_frame = self._sample_beat_frame(prev_scene, t)
+            alpha = np.clip(rel_time / transition_dur, 0.0, 1.0)
+            return Image.blend(prev_frame, curr_frame, alpha)
+
+        return curr_frame
 
 
 # -----------------------------------------------------------------------------
@@ -266,11 +307,14 @@ def render_kinetic_short_video(
     topic: str,
     visual_seed: int,
     hook_duration: float = 3.5,
+    spoken_text: str = "",
     fps: int = DEFAULT_FPS,
 ) -> Path:
     """
     Renders the complete 1080x1920 vertical video with MoviePy and native FFmpeg:
-    - Dynamic Ken Burns zoom
+    - Sentence-by-sentence dynamic visual beats (every 2.8 - 4.0s)
+    - 350ms seamless cross-dissolves (zero black screens)
+    - Ken Burns micro-motion on all scenes
     - Hormozi subtitle cards with dynamic velocity scaling
     - 0dB / -20dB mastered audio sync
     """
@@ -288,6 +332,7 @@ def render_kinetic_short_video(
         palette=palette,
         topic=topic,
         seed=visual_seed,
+        spoken_text=spoken_text,
     )
 
     # Pre-cache subtitle card PIL images and hook badge for fast composition

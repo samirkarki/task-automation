@@ -18,6 +18,7 @@ try:
     from moviepy.editor import (
         AudioFileClip,
         VideoClip,
+        VideoFileClip,
         ImageClip,
         CompositeVideoClip,
         CompositeAudioClip,
@@ -29,6 +30,7 @@ except ImportError:
         from moviepy import (
             AudioFileClip,
             VideoClip,
+            VideoFileClip,
             ImageClip,
             CompositeVideoClip,
         )
@@ -41,6 +43,7 @@ except ImportError:
     except ImportError:
         AudioFileClip = None
         VideoClip = None
+        VideoFileClip = None
         ImageClip = None
         CompositeVideoClip = None
         CompositeAudioClip = None
