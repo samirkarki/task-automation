@@ -15,6 +15,7 @@ from clipping.config import (
     YOUTUBE_SCOPES,
 )
 
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 logger = logging.getLogger("clipping.publishing.youtube_uploader")
 
 

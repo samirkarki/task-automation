@@ -5,8 +5,12 @@ Allows authenticating with YouTube without needing a graphical desktop browser.
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
+
+# Allow HTTP callback on localhost for headless OAuth
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 # Ensure project root in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -75,7 +79,14 @@ def authenticate_headless():
         if not redirect_response.startswith("http"):
             redirect_response = "http://" + redirect_response
 
-        flow.fetch_token(authorization_response=redirect_response)
+        try:
+            flow.fetch_token(authorization_response=redirect_response)
+        except Exception as ex:
+            if "insecure_transport" in str(ex).lower() and redirect_response.startswith("http://"):
+                https_url = "https://" + redirect_response[7:]
+                flow.fetch_token(authorization_response=https_url)
+            else:
+                raise
         creds = flow.credentials
 
         token_path.parent.mkdir(parents=True, exist_ok=True)
