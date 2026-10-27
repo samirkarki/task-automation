@@ -42,6 +42,8 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Execute pipeline without publishing live to YouTube.")
     parser.add_argument("--clips", type=int, default=3, help="Number of clips to generate.")
     parser.add_argument("--privacy", type=str, default="public", choices=["public", "unlisted", "private"], help="YouTube upload privacy status (default: public).")
+    parser.add_argument("--audio-mode", type=str, default="original", choices=["original", "soothing"], help="Audio mode: 'original' (keeps real speaker's human voice) or 'soothing' (uses natural human voiceover).")
+    parser.add_argument("--voice", type=str, default="andrew", choices=["andrew", "brian", "christopher", "ava", "ryan"], help="Soothing human voice preset (default: andrew).")
     parser.add_argument("--report", action="store_true", help="Generate and print weekly performance audit report.")
     parser.add_argument("--optimize", action="store_true", help="Run strategy optimizer feedback loop.")
     parser.add_argument("--poll", action="store_true", help="Poll YouTube Data API for live statistics.")
@@ -82,6 +84,8 @@ def main():
         dry_run=args.dry_run,
         clips_to_generate=args.clips,
         privacy=args.privacy,
+        audio_mode=args.audio_mode,
+        voice=args.voice,
     )
 
 

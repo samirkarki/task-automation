@@ -83,6 +83,8 @@ def run_pipeline(
     dry_run: bool = False,
     clips_to_generate: int = CLIPS_PER_DAY,
     privacy: str = "public",
+    audio_mode: str = "original",
+    voice: str = "andrew",
 ) -> List[str]:
     """
     Executes the full end-to-end autonomous clipping and monetization pipeline.
@@ -163,20 +165,23 @@ def run_pipeline(
             clip_idx = idx + 1
             logger.info(f"\n--- Processing Clip {clip_idx}/{len(selected_clips)} ({clip.duration:.0f}s) ---")
 
-            # Layer 1: Original commentary script
             commentary = write_commentary(clip)
+            master_audio = None
 
-            # Layer 2: Neural voiceover narration
-            tts_path = OUTPUT_DIR / f"tts_narration_{clip_idx}.mp3"
-            generate_narration(commentary, tts_path)
-
-            # Layer 3: Master audio composite (source audio discarded)
-            master_audio = OUTPUT_DIR / f"master_audio_{clip_idx}.wav"
-            compose_clip_audio(tts_path, master_audio)
+            if audio_mode == "soothing":
+                logger.info(f"Synthesizing soothing human voice narration (voice='{voice}')...")
+                tts_path = OUTPUT_DIR / f"tts_narration_{clip_idx}.mp3"
+                generate_narration(commentary, tts_path, voice=voice)
+                master_audio = OUTPUT_DIR / f"master_audio_{clip_idx}.wav"
+                compose_clip_audio(tts_path, master_audio)
+                sub_source = commentary
+            else:
+                logger.info("Retaining authentic human speaker's voice from original video.")
+                sub_source = clip.word_segments if clip.word_segments else clip.transcript_segment
 
             # Layer 4: Word-level ASS karaoke subtitles
             sub_path = OUTPUT_DIR / f"karaoke_subs_{clip_idx}.ass"
-            generate_karaoke_subtitles(clip.word_segments if clip.word_segments else commentary, sub_path, total_duration=clip.duration)
+            generate_karaoke_subtitles(sub_source, sub_path, total_duration=clip.duration)
 
             # Layer 5 & 6: 9:16 Vertical crop, color grade shift, top hook banner
             short_path = OUTPUT_DIR / f"short_clip_{clip_idx}.mp4"

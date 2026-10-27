@@ -1,6 +1,7 @@
 """
-Neural Text-to-Speech (TTS) narrator for commentary voiceovers using Edge-TTS.
-Generates crystal-clear narration with optimal conversational pacing for short-form video.
+Soothing Human Neural Speech Synthesis Engine.
+Replaces robotic announcer voices with warm, calming, natural human voices
+(e.g., Andrew Multilingual, Brian, Christopher) with relaxed human pacing.
 """
 
 import asyncio
@@ -11,8 +12,17 @@ from typing import Optional
 
 logger = logging.getLogger("clipping.transformation.tts_narrator")
 
-DEFAULT_VOICE = os.getenv("TTS_VOICE_EN", "en-US-GuyNeural")
-DEFAULT_RATE = os.getenv("TTS_RATE_EN", "+4%")
+# Soothing, natural human voice presets
+SOOTHING_VOICES = {
+    "andrew": "en-US-AndrewMultilingualNeural",   # Warm, authoritative, conversational podcast host
+    "brian": "en-US-BrianMultilingualNeural",     # Gentle, calm, soothing human tone
+    "christopher": "en-US-ChristopherNeural",     # Deep, mature, soothing documentary narrator
+    "ava": "en-US-AvaMultilingualNeural",         # Warm, expressive, soothing female voice
+    "ryan": "en-GB-RyanNeural",                   # Refined, calm British narrator
+}
+
+DEFAULT_VOICE = os.getenv("TTS_VOICE_EN", SOOTHING_VOICES["andrew"])
+DEFAULT_RATE = os.getenv("TTS_RATE_EN", "+0%")  # Relaxed, natural human cadence (not rushed)
 DEFAULT_PITCH = os.getenv("TTS_PITCH_EN", "+0Hz")
 
 
@@ -32,23 +42,25 @@ def generate_narration(
     pitch: Optional[str] = None,
 ) -> Path:
     """
-    Synchronously synthesizes neural speech audio to output_path.
+    Synchronously synthesizes soothing human neural speech audio to output_path.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    sel_voice = voice or DEFAULT_VOICE
-    sel_rate = rate or DEFAULT_RATE
-    sel_pitch = pitch or DEFAULT_PITCH
 
-    logger.info(f"Synthesizing commentary narration with '{sel_voice}' (rate={sel_rate})...")
+    # Resolve preset name if alias was given (e.g. 'brian' -> 'en-US-BrianMultilingualNeural')
+    selected_voice = SOOTHING_VOICES.get(voice, voice) if voice else DEFAULT_VOICE
+    selected_rate = rate or DEFAULT_RATE
+    selected_pitch = pitch or DEFAULT_PITCH
+
+    logger.info(f"Synthesizing soothing human narration with '{selected_voice}' (rate={selected_rate})...")
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(_async_synthesize(text, output_path, sel_voice, sel_rate, sel_pitch))
+            loop.run_until_complete(_async_synthesize(text, output_path, selected_voice, selected_rate, selected_pitch))
         finally:
             loop.close()
 
-        logger.info(f"Narration generated at {output_path} ({output_path.stat().st_size} bytes).")
+        logger.info(f"Soothing voiceover audio generated at: {output_path} ({output_path.stat().st_size} bytes).")
         return output_path
     except Exception as e:
         logger.warning(f"Edge-TTS failed ({e}). Generating fallback audio tone...")
@@ -57,7 +69,7 @@ def generate_narration(
         import math
 
         words = len(text.split())
-        dur = max(3.0, words / 2.5)
+        dur = max(3.0, words / 2.3)
         sample_rate = 44100
         with wave.open(str(output_path), "wb") as wav_file:
             wav_file.setnchannels(1)
