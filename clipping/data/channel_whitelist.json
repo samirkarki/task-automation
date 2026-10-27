@@ -1,0 +1,32 @@
+[
+  {
+    "channel_id": "UCGq-a57w-aPwyi3pW7XbH3w",
+    "channel_name": "The Diary Of A CEO",
+    "permission_type": "clip_friendly",
+    "niche": "business_wealth"
+  },
+  {
+    "channel_id": "UCnmn3kFq8G_EFrgLw8y2P9g",
+    "channel_name": "My First Million",
+    "permission_type": "clip_friendly",
+    "niche": "business_wealth"
+  },
+  {
+    "channel_id": "UC2D2CMWXMOVWx7giW1n3LIg",
+    "channel_name": "Huberman Lab",
+    "permission_type": "clip_friendly",
+    "niche": "business_wealth"
+  },
+  {
+    "channel_id": "UCSHZKyawb77ixDdsGog4iWA",
+    "channel_name": "Lex Fridman",
+    "permission_type": "clip_friendly",
+    "niche": "business_wealth"
+  },
+  {
+    "channel_id": "UCbSEMXPzR_c2aZ_mPqC_4Lw",
+    "channel_name": "Alex Hormozi",
+    "permission_type": "clip_friendly",
+    "niche": "business_wealth"
+  }
+]

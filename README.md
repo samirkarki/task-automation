@@ -95,6 +95,16 @@ nepse-faceless-automation/
 │   ├── win_rate_tracker.py             # Persistent SQLite audit for win-rates & marketing proof
 │   ├── nepse_analyzer.py               # Orchestrator for scraper, trading engine & Telegram
 │   └── output/                         # Temporary staging (auto-cleaned upon sync)
+├── clipping/
+│   ├── discovery/                      # yt-dlp search & multi-gate compliance filter
+│   ├── extraction/                     # Heatmap parser, Faster-Whisper & viral clip selector
+│   ├── transformation/                 # 6-layer shield (original commentary, TTS, karaoke .ass)
+│   ├── publishing/                     # YouTube Data API OAuth2 uploader & affiliate injector
+│   ├── analytics/                      # SQLite performance DB & revenue estimator
+│   ├── strategy/                       # A/B tester, weekly audit & strategy optimizer
+│   ├── orchestrator.py                 # End-to-end pipeline coordinator
+│   ├── clipper.py                      # Multi-action CLI entry point
+│   └── runner.py                       # 24/7 autonomous shorts scheduling daemon
 └── logs/                               # Execution and daemon logs
 ```
 
