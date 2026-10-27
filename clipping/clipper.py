@@ -44,10 +44,15 @@ def main():
     parser.add_argument("--report", action="store_true", help="Generate and print weekly performance audit report.")
     parser.add_argument("--optimize", action="store_true", help="Run strategy optimizer feedback loop.")
     parser.add_argument("--poll", action="store_true", help="Poll YouTube Data API for live statistics.")
+    parser.add_argument("--auth", action="store_true", help="Authenticate YouTube in headless Ubuntu terminal without browser.")
 
     args = parser.parse_args()
 
     # Route commands
+    if args.auth:
+        from clipping.auth import authenticate_headless
+        authenticate_headless()
+        return
     if args.report:
         report = generate_weekly_report()
         print("\n" + report)
