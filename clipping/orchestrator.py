@@ -82,6 +82,7 @@ def run_pipeline(
     url: Optional[str] = None,
     dry_run: bool = False,
     clips_to_generate: int = CLIPS_PER_DAY,
+    privacy: str = "public",
 ) -> List[str]:
     """
     Executes the full end-to-end autonomous clipping and monetization pipeline.
@@ -198,6 +199,7 @@ def run_pipeline(
                 video_path=short_path,
                 metadata=metadata,
                 ab_variant=ab_variant,
+                privacy=privacy,
                 dry_run=dry_run,
             )
 
