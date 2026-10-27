@@ -51,20 +51,16 @@ def get_authenticated_service():
         flow = InstalledAppFlow.from_client_secrets_file(str(secrets_path), YOUTUBE_SCOPES)
         try:
             creds = flow.run_local_server(port=0)
-        except Exception as e:
-            logger.info("No GUI desktop browser detected (headless Linux). Opening manual authorization flow...")
-            try:
-                creds = flow.run_local_server(port=8080, open_browser=False)
-            except Exception:
-                logger.error(
-                    "Headless OAuth flow could not open a local port. "
-                    "RECOMMENDED: Run authentication once on your local machine to generate "
-                    "'secrets/youtube_token.json' and copy that file to your Ubuntu server."
-                )
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(token_path, "w", encoding="utf-8") as token_file:
+                token_file.write(creds.to_json())
+        except Exception:
+            logger.info("No desktop browser detected. Switching to headless console authentication...")
+            from clipping.auth import authenticate_headless
+            if authenticate_headless():
+                creds = Credentials.from_authorized_user_file(str(token_path), YOUTUBE_SCOPES)
+            else:
                 return None
-        token_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(token_path, "w", encoding="utf-8") as token_file:
-            token_file.write(creds.to_json())
 
     return build("youtube", "v3", credentials=creds)
 
