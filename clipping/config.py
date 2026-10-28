@@ -45,6 +45,15 @@ YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
 ]
 
+# --- Instagram Graph API Configuration ---
+INSTAGRAM_ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN", "")
+INSTAGRAM_ACCOUNT_ID = os.getenv("INSTAGRAM_ACCOUNT_ID", "")
+
+# --- TikTok Content Posting API Configuration ---
+TIKTOK_ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN", "")
+TIKTOK_PRIVACY_LEVEL = os.getenv("TIKTOK_PRIVACY_LEVEL", "PUBLIC_TO_EVERYONE")
+
+
 # --- Cloud Storage (rclone) ---
 GDRIVE_REMOTE = os.getenv(
     "RCLONE_CLIPS_REMOTE",

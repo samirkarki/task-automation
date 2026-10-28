@@ -31,6 +31,7 @@ from clipping.transformation.audio_mixer import compose_clip_audio
 from clipping.transformation.video_processor import render_transformed_short
 from clipping.publishing.metadata_optimizer import generate_metadata
 from clipping.publishing.youtube_uploader import upload_short_to_youtube
+from clipping.publishing.multi_publisher import publish_to_all_platforms
 from clipping.analytics.database import AnalyticsDB
 
 logger = logging.getLogger("clipping.orchestrator")
@@ -198,15 +199,17 @@ def run_pipeline(
             metadata = generate_metadata(clip, commentary)
             ab_variant = "A" if clip_idx % 2 != 0 else "B"
 
-            # Step 7: Publishing & Analytics Logging
-            logger.info(f"[6/7] Publishing Short to YouTube (Variant {ab_variant})...")
-            yt_url = upload_short_to_youtube(
+            # Step 7: Multi-Platform Publishing (YouTube Shorts, Instagram Reels, TikTok)
+            logger.info(f"[6/7] Syndicating to enabled platforms (YouTube, Instagram, TikTok) [Variant {ab_variant}]...")
+            pub_results = publish_to_all_platforms(
                 video_path=short_path,
                 metadata=metadata,
                 ab_variant=ab_variant,
                 privacy=privacy,
                 dry_run=dry_run,
             )
+
+            yt_url = pub_results.get("youtube")
 
             if yt_url:
                 published_urls.append(yt_url)
