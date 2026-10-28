@@ -58,18 +58,31 @@ def upload_reel_to_instagram(
         logger.info(f"  Caption Preview: {caption[:120]}...")
         return f"https://www.instagram.com/reel/DRY_RUN_{video_path.stem}"
 
-    if not INSTAGRAM_ACCESS_TOKEN or not INSTAGRAM_ACCOUNT_ID:
-        logger.info("Instagram credentials not configured in .env (INSTAGRAM_ACCESS_TOKEN, INSTAGRAM_ACCOUNT_ID). Skipping Instagram upload.")
+    access_token = INSTAGRAM_ACCESS_TOKEN
+    account_id = INSTAGRAM_ACCOUNT_ID
+
+    token_file = Path(__file__).resolve().parent.parent.parent / "secrets" / "instagram_token.json"
+    if (not access_token or not account_id) and token_file.exists():
+        try:
+            import json
+            token_data = json.loads(token_file.read_text(encoding="utf-8"))
+            access_token = access_token or token_data.get("access_token")
+            account_id = account_id or token_data.get("instagram_account_id")
+        except Exception as e:
+            logger.warning(f"Could not load secrets/instagram_token.json: {e}")
+
+    if not access_token or not account_id:
+        logger.info("Instagram credentials not configured in .env or secrets/instagram_token.json. Skipping Instagram upload.")
         return None
 
     file_size = video_path.stat().st_size
-    init_url = f"https://graph.facebook.com/{API_VERSION}/{INSTAGRAM_ACCOUNT_ID}/media"
+    init_url = f"https://graph.facebook.com/{API_VERSION}/{account_id}/media"
 
     logger.info(f"Initiating Instagram Reels resumable upload for {video_path.name} ({file_size / (1024*1024):.2f} MB)...")
 
     # Step 1: Initialize Resumable Upload Session
     init_payload = {
-        "access_token": INSTAGRAM_ACCESS_TOKEN,
+        "access_token": access_token,
         "upload_type": "resumable",
         "media_type": "REELS",
         "caption": caption,
@@ -93,7 +106,7 @@ def upload_reel_to_instagram(
         # Step 2: Upload Binary Video Stream
         logger.info(f"Transferring binary video stream to Meta rupload endpoint...")
         headers = {
-            "Authorization": f"OAuth {INSTAGRAM_ACCESS_TOKEN}",
+            "Authorization": f"OAuth {access_token}",
             "file_offset": "0",
         }
 
@@ -111,7 +124,7 @@ def upload_reel_to_instagram(
 
         for _ in range(20):  # Poll up to 100 seconds
             time.sleep(5)
-            check_res = requests.get(status_url, params={"fields": "status_code", "access_token": INSTAGRAM_ACCESS_TOKEN}, timeout=20)
+            check_res = requests.get(status_url, params={"fields": "status_code", "access_token": access_token}, timeout=20)
             status_data = check_res.json()
             code = status_data.get("status_code")
 
@@ -129,8 +142,8 @@ def upload_reel_to_instagram(
 
         # Step 4: Publish Reel
         logger.info(f"Publishing container {container_id} to Instagram feed...")
-        publish_url = f"https://graph.facebook.com/{API_VERSION}/{INSTAGRAM_ACCOUNT_ID}/media_publish"
-        pub_res = requests.post(publish_url, data={"creation_id": container_id, "access_token": INSTAGRAM_ACCESS_TOKEN}, timeout=30)
+        publish_url = f"https://graph.facebook.com/{API_VERSION}/{account_id}/media_publish"
+        pub_res = requests.post(publish_url, data={"creation_id": container_id, "access_token": access_token}, timeout=30)
         pub_data = pub_res.json()
 
         media_id = pub_data.get("id")

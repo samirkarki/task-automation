@@ -48,6 +48,7 @@ def main():
     parser.add_argument("--optimize", action="store_true", help="Run strategy optimizer feedback loop.")
     parser.add_argument("--poll", action="store_true", help="Poll YouTube Data API for live statistics.")
     parser.add_argument("--auth", action="store_true", help="Authenticate YouTube in headless Ubuntu terminal without browser.")
+    parser.add_argument("--auth-instagram", action="store_true", help="Authenticate Instagram Graph API in headless Ubuntu terminal.")
 
     args = parser.parse_args()
 
@@ -55,6 +56,10 @@ def main():
     if args.auth:
         from clipping.auth import authenticate_headless
         authenticate_headless()
+        return
+    if args.auth_instagram:
+        from clipping.auth_instagram import authenticate_instagram
+        authenticate_instagram()
         return
     if args.report:
         report = generate_weekly_report()

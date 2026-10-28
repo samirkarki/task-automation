@@ -116,13 +116,13 @@ UPLOAD_TIMES_UTC = ["14:00", "17:30", "21:00"]
 MIN_HOURS_BETWEEN_UPLOADS = 4
 
 # --- Day-1 Monetization & Affiliate Links ---
-BRIDGE_PAGE_URL = os.getenv("BRIDGE_PAGE_URL", "https://yourname.beacons.ai")
+BRIDGE_PAGE_URL = os.getenv("BRIDGE_PAGE_URL", "https://beacons.ai/samctec")
 TELEGRAM_COMMUNITY_LINK = os.getenv(
     "TELEGRAM_FREE_INVITE_LINK",
     "https://t.me/your_business_channel"
 )
 AFFILIATE_LINKS = {
-    "tools": os.getenv("AFFILIATE_TOOLS_LINK", "https://yourname.beacons.ai"),
+    "tools": os.getenv("AFFILIATE_TOOLS_LINK", "https://beacons.ai/samctec"),
     "books": os.getenv("AFFILIATE_BOOKS_LINK", "https://amzn.to/yourlist"),
     "newsletter": os.getenv("NEWSLETTER_SIGNUP_LINK", "https://yourname.substack.com"),
 }
