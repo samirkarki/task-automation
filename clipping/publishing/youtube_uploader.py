@@ -41,6 +41,23 @@ def get_authenticated_service():
         except Exception as e:
             logger.warning(f"Existing token file invalid: {e}")
 
+    # Automatic refresh when access token expires (tokens expire after 1 hour)
+    if creds and not creds.valid:
+        if creds.refresh_token:
+            try:
+                from google.auth.transport.requests import Request
+                logger.info("YouTube access token expired. Automatically refreshing via OAuth refresh_token...")
+                creds.refresh(Request())
+                token_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(token_path, "w", encoding="utf-8") as token_file:
+                    token_file.write(creds.to_json())
+                logger.info("YouTube OAuth access token successfully refreshed and updated in secrets/youtube_token.json.")
+            except Exception as e:
+                logger.warning(f"Failed to refresh OAuth token: {e}. Falling back to re-authentication...")
+                creds = None
+        else:
+            creds = None
+
     if not creds or not creds.valid:
         if not secrets_path.exists():
             logger.warning(

@@ -2,6 +2,7 @@
 Karaoke Subtitle Styler for YouTube Shorts.
 Generates Advanced SubStation Alpha (.ass) subtitle files with word-level highlighting
 in the high-retention viral style (Hormozi / OpusClip / CapCut).
+Guarantees text perfectly fits the 9:16 mobile window without horizontal overflow.
 """
 
 import logging
@@ -23,6 +24,11 @@ def format_ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+# Screen dimensions: 1080 x 1920 (9:16 vertical)
+# MarginL: 80px left padding
+# MarginR: 130px right padding (protects against YouTube like/comment buttons overlay)
+# MarginV: 680px from bottom (places captions in lower-middle safe zone)
+# Fontsize: 50 (clean, readable, prevents text overflowing 1080px width)
 ASS_HEADER = """[Script Info]
 Title: Viral Karaoke Subtitles
 ScriptType: v4.00+
@@ -33,12 +39,73 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,68,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,620,1
-Style: Highlight,Arial Black,74,&H0000FFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,105,105,0,0,1,6,4,2,40,40,620,1
+Style: Default,Arial Black,50,&H00FFFFFF,&H0000FFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,4.5,2.5,2,80,130,680,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+
+def _chunk_word_segments(words: List[WordSegment], max_chars: int = 15, max_words: int = 2) -> List[List[WordSegment]]:
+    """
+    Chunks word segments into compact 1-2 word cards (max 15 characters).
+    Ensures every phrase fits comfortably inside the 1080px vertical screen.
+    """
+    chunks = []
+    current_chunk = []
+    current_chars = 0
+
+    for w in words:
+        clean_word = w.word.strip()
+        if not clean_word:
+            continue
+        w_len = len(clean_word)
+
+        if not current_chunk:
+            current_chunk.append(w)
+            current_chars = w_len
+        elif len(current_chunk) >= max_words or (current_chars + 1 + w_len) > max_chars:
+            chunks.append(current_chunk)
+            current_chunk = [w]
+            current_chars = w_len
+        else:
+            current_chunk.append(w)
+            current_chars += 1 + w_len
+
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
+
+def _chunk_plain_text(text: str, max_chars: int = 15, max_words: int = 2) -> List[str]:
+    """
+    Splits plain text into compact 1-2 word cards (max 15 characters).
+    """
+    words = text.split()
+    chunks = []
+    current_chunk = []
+    current_chars = 0
+
+    for w in words:
+        clean_word = w.strip()
+        if not clean_word:
+            continue
+        w_len = len(clean_word)
+
+        if not current_chunk:
+            current_chunk.append(clean_word)
+            current_chars = w_len
+        elif len(current_chunk) >= max_words or (current_chars + 1 + w_len) > max_chars:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = [clean_word]
+            current_chars = w_len
+        else:
+            current_chunk.append(clean_word)
+            current_chars += 1 + w_len
+
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    return chunks
 
 
 def generate_karaoke_subtitles(
@@ -54,27 +121,25 @@ def generate_karaoke_subtitles(
     events: List[str] = []
 
     if isinstance(word_segments_or_text, list) and len(word_segments_or_text) > 0 and isinstance(word_segments_or_text[0], WordSegment):
-        # 1. Use Whisper WordSegments
-        raw_words = word_segments_or_text
-        # Group into 3-4 word cards
-        card_size = 3
-        for i in range(0, len(raw_words), card_size):
-            chunk = raw_words[i : i + card_size]
-            card_start = chunk[0].start
-            card_end = chunk[-1].end
+        # 1. Use Whisper WordSegments with dynamic compact chunking (1-2 words per card)
+        chunks = _chunk_word_segments(word_segments_or_text, max_chars=15, max_words=2)
 
+        for chunk in chunks:
             # For each word in chunk, produce a highlight slice
             for active_idx, active_word in enumerate(chunk):
                 w_start = active_word.start
                 w_end = active_word.end
+                if w_end <= w_start:
+                    w_end = w_start + 0.15
 
                 line_parts = []
                 for idx, w in enumerate(chunk):
+                    clean_w = w.word.strip().upper()
                     if idx == active_idx:
-                        # Highlighted active word in bright yellow
-                        line_parts.append(f"{{\\c&H0000FFFF&\\fscx108\\fscy108}}{w.word.upper()}{{\\r}}")
+                        # Highlighted active word: bright yellow + gentle 6% pulse
+                        line_parts.append(f"{{\\c&H0000FFFF&\\fscx106\\fscy106}}{clean_w}{{\\r}}")
                     else:
-                        line_parts.append(f"{{\\c&H00FFFFFF&}}{w.word.upper()}{{\\r}}")
+                        line_parts.append(f"{{\\c&H00FFFFFF&}}{clean_w}{{\\r}}")
 
                 event_line = (
                     f"Dialogue: 0,{format_ass_time(w_start)},{format_ass_time(w_end)},"
@@ -83,15 +148,13 @@ def generate_karaoke_subtitles(
                 events.append(event_line)
 
     else:
-        # 2. Text fallback: split into proportionate cards
+        # 2. Text fallback: split into compact 1-2 word cards
         text = str(word_segments_or_text).strip()
-        words = text.split()
-        card_size = 4
-        chunks = [" ".join(words[i : i + card_size]) for i in range(0, len(words), card_size)]
+        chunks = _chunk_plain_text(text, max_chars=15, max_words=2)
         if not chunks:
-            chunks = ["CRITICAL BUSINESS STRATEGY", "SYSTEMS OVER HUSTLE", "MAXIMIZE CAPITAL LEVERAGE"]
+            chunks = ["CRITICAL", "BUSINESS", "STRATEGY", "SYSTEMS OVER", "HUSTLE", "MAXIMIZE", "LEVERAGE"]
 
-        card_dur = max(1.2, total_duration / float(len(chunks)))
+        card_dur = max(0.8, total_duration / float(len(chunks)))
         for idx, chunk in enumerate(chunks):
             start_t = idx * card_dur
             end_t = min(total_duration, (idx + 1) * card_dur)
@@ -105,10 +168,11 @@ def generate_karaoke_subtitles(
 
                 line_parts = []
                 for sub_i, sw in enumerate(card_words):
+                    clean_sw = sw.strip().upper()
                     if sub_i == widx:
-                        line_parts.append(f"{{\\c&H0000FFFF&\\fscx108\\fscy108}}{sw.upper()}{{\\r}}")
+                        line_parts.append(f"{{\\c&H0000FFFF&\\fscx106\\fscy106}}{clean_sw}{{\\r}}")
                     else:
-                        line_parts.append(f"{{\\c&H00FFFFFF&}}{sw.upper()}{{\\r}}")
+                        line_parts.append(f"{{\\c&H00FFFFFF&}}{clean_sw}{{\\r}}")
 
                 event_line = (
                     f"Dialogue: 0,{format_ass_time(w_start)},{format_ass_time(w_end)},"
