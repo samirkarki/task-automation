@@ -14,6 +14,7 @@ Orchestrates:
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -198,15 +199,35 @@ def render_remotion_video(
     assets: Dict[str, Any],
     output_mp4: Path,
 ) -> Optional[Path]:
-    """Renders the video composited in React/Remotion."""
+    """Renders the video composited in React/Remotion with staged public assets."""
     renderer_dir = PROJECT_ROOT / "ayurveda-content" / "renderer"
+    public_dir = renderer_dir / "public"
+    public_dir.mkdir(parents=True, exist_ok=True)
     props_file = assets["work_dir"] / "remotion_props.json"
+    session_id = str(uuid.uuid4())[:8]
 
-    # Relative paths from renderer directory or absolute URLs for Remotion
+    # Stage audio into renderer/public/ for zero-CORS browser access
+    staged_audio_name = f"voice_{session_id}.wav"
+    staged_audio_path = public_dir / staged_audio_name
+    if assets.get("audio_path") and Path(assets["audio_path"]).exists() and Path(assets["audio_path"]).stat().st_size > 1000:
+        shutil.copyfile(str(assets["audio_path"]), str(staged_audio_path))
+    else:
+        staged_audio_name = ""
+
+    # Stage visual clips if any (preserve actual extension .mp4 / .jpg)
+    staged_clips: List[str] = []
+    for idx, clip in enumerate(assets.get("stock_clips", [])):
+        clip_p = Path(clip)
+        if clip_p.exists() and clip_p.stat().st_size > 10000:
+            ext = clip_p.suffix.lower() if clip_p.suffix else ".mp4"
+            c_name = f"clip_{session_id}_{idx}{ext}"
+            shutil.copyfile(str(clip_p), str(public_dir / c_name))
+            staged_clips.append(c_name)
+
     props = {
-        "audioSrc": str(assets["audio_path"]),
+        "audioSrc": staged_audio_name,
         "words": assets["words"],
-        "videoClips": assets["stock_clips"],
+        "videoClips": staged_clips,
         "badgeText": assets["topic"].get("badge", "AYURVEDA SECRETS"),
         "topicTitle": assets["topic"].get("subject", ""),
         "cards": assets.get("cards", []),
@@ -223,10 +244,19 @@ def render_remotion_video(
         "AyurvedaShort",
         str(output_mp4.resolve()),
         f"--props={str(props_file.resolve())}",
+        "--public-dir=public",
     ]
 
     logger.info(f"Triggering Remotion render: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=str(renderer_dir), capture_output=True, text=True)
+
+    # Cleanup staged public files to keep renderer clean
+    if staged_audio_path.exists():
+        staged_audio_path.unlink()
+    for c_name in staged_clips:
+        cp = public_dir / c_name
+        if cp.exists():
+            cp.unlink()
 
     if result.returncode == 0 and output_mp4.exists():
         logger.info(f"[+] Successfully rendered final video: {output_mp4}")

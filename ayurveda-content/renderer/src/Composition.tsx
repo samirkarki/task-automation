@@ -1,5 +1,5 @@
 import React from "react";
-import { Audio, CalculateMetadataFunction, Composition } from "remotion";
+import { Audio, CalculateMetadataFunction, Composition, staticFile } from "remotion";
 import { Captions, WordData } from "./Captions";
 import { BackgroundVideos } from "./BackgroundVideos";
 import { HeaderBadge } from "./HeaderBadge";
@@ -93,7 +93,15 @@ export const AyurvedaShort: React.FC<AyurvedaShortProps> = ({
       <Captions words={words} />
 
       {/* 5. Master Voiceover Audio */}
-      {audioSrc ? <Audio src={audioSrc} /> : null}
+      {audioSrc && audioSrc.trim() !== "" ? (
+        <Audio
+          src={
+            audioSrc.startsWith("http") || audioSrc.startsWith("data:")
+              ? audioSrc
+              : staticFile(audioSrc)
+          }
+        />
+      ) : null}
     </div>
   );
 };

@@ -1,16 +1,21 @@
 import React from "react";
-import { interpolate, OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig } from "remotion";
+import { Img, interpolate, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 
 interface BackgroundVideosProps {
   clips: string[];
 }
 
-export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips }) => {
+export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [] }) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
 
+  // Filter out any empty strings or undefined entries
+  const validClips = (clips || []).filter(
+    (c) => Boolean(c) && typeof c === "string" && c.trim() !== ""
+  );
+
   // If no clips are downloaded or available, render an organic ambient Ayurvedic gradient
-  if (!clips || clips.length === 0) {
+  if (validClips.length === 0) {
     const pulse = interpolate(
       Math.sin((frame / 30) * 1.5),
       [-1, 1],
@@ -58,7 +63,7 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips }) => 
     );
   }
 
-  const framesPerClip = Math.ceil(durationInFrames / clips.length);
+  const framesPerClip = Math.ceil(durationInFrames / validClips.length);
 
   return (
     <div
@@ -72,8 +77,14 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips }) => 
         backgroundColor: "#000000",
       }}
     >
-      {clips.map((clipSrc, idx) => {
+      {validClips.map((clipSrc, idx) => {
         const fromFrame = idx * framesPerClip;
+        const resolvedSrc =
+          clipSrc.startsWith("http") || clipSrc.startsWith("data:")
+            ? clipSrc
+            : staticFile(clipSrc);
+        const isVideo = /\.(mp4|webm|mov)(\?|$)/i.test(clipSrc);
+
         return (
           <Sequence
             key={`${clipSrc}-${idx}`}
@@ -85,17 +96,32 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips }) => 
                 width: "100%",
                 height: "100%",
                 position: "relative",
+                overflow: "hidden",
               }}
             >
-              <OffthreadVideo
-                src={clipSrc}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  filter: "brightness(0.78) contrast(1.1)",
-                }}
-              />
+              {isVideo ? (
+                <OffthreadVideo
+                  src={resolvedSrc}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    filter: "brightness(0.75) contrast(1.15)",
+                  }}
+                />
+              ) : (
+                <Img
+                  src={resolvedSrc}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    filter: "brightness(0.72) contrast(1.18)",
+                    transform: `scale(${1.04 + (idx % 2 === 0 ? 0.08 : -0.04) * ((frame - fromFrame) / framesPerClip)})`,
+                    transition: "transform 0.05s linear",
+                  }}
+                />
+              )}
             </div>
           </Sequence>
         );
