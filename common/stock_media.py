@@ -21,15 +21,25 @@ logger = logging.getLogger("common.stock_media")
 # Curated High-Definition CC0 Public Domain Vertical Wellness / Nature Video URLs
 # These serve as instant, zero-key fallbacks so anyone can test and render immediately!
 CURATED_CC0_WELLNESS_VIDEOS = [
-    # 1. Warm Herbal Tea / Pouring Water
+    # 1. Warm Herbal Tea / Steaming Pour
     "https://assets.mixkit.co/videos/preview/mixkit-hot-tea-poured-into-a-cup-42898-large.mp4",
-    # 2. Relaxing Nature Meditation / Sunlight Trees
-    "https://assets.mixkit.co/videos/preview/mixkit-sun-rays-shining-through-the-branches-of-a-tree-42528-large.mp4",
-    # 3. Forest River / Flowing Water
-    "https://assets.mixkit.co/videos/preview/mixkit-river-stream-in-the-forest-42527-large.mp4",
-    # 4. Spices & Botanical Herbs Mortar
+    # 2. Pouring Water Into Clear Glass
+    "https://assets.mixkit.co/videos/preview/mixkit-pouring-water-into-a-glass-41484-large.mp4",
+    # 3. Slicing Fresh Lemon & Botanical Ingredients
+    "https://assets.mixkit.co/videos/preview/mixkit-cutting-a-lemon-in-half-on-a-wooden-board-42930-large.mp4",
+    # 4. Spices & Botanical Herbs in Mortar & Pestle
     "https://assets.mixkit.co/videos/preview/mixkit-mortar-and-pestle-with-herbs-and-spices-41525-large.mp4",
-    # 5. Peaceful Night Sky / Sleep
+    # 5. Forest River Stream / Flowing Fresh Water
+    "https://assets.mixkit.co/videos/preview/mixkit-river-stream-in-the-forest-42527-large.mp4",
+    # 6. Cooking Warm Nutritious Food in Pan (Metabolic Flame)
+    "https://assets.mixkit.co/videos/preview/mixkit-cooking-fresh-vegetables-in-a-pan-43410-large.mp4",
+    # 7. Sunlight Rays Streaming Through Green Forest Trees
+    "https://assets.mixkit.co/videos/preview/mixkit-sun-rays-shining-through-the-branches-of-a-tree-42528-large.mp4",
+    # 8. Calm Breathing & Deep Vitality in Nature
+    "https://assets.mixkit.co/videos/preview/mixkit-woman-doing-breathing-exercises-in-nature-42529-large.mp4",
+    # 9. Eating Healthy Nourishing Meal
+    "https://assets.mixkit.co/videos/preview/mixkit-eating-a-healthy-salad-bowl-43407-large.mp4",
+    # 10. Peaceful Night Sky / Restful Sleep
     "https://assets.mixkit.co/videos/preview/mixkit-night-sky-with-stars-and-clouds-42531-large.mp4",
 ]
 
@@ -124,7 +134,7 @@ class PixabayClient:
     def is_available(self) -> bool:
         return bool(self.api_key)
 
-    def search_videos(self, query: str) -> List[Dict[str, Any]]:
+    def search_videos(self, query: str, per_page: int = 10) -> List[Dict[str, Any]]:
         if not self.is_available:
             return []
         url = "https://pixabay.com/api/videos/"
@@ -132,7 +142,7 @@ class PixabayClient:
             "key": self.api_key,
             "q": query,
             "video_type": "all",
-            "per_page": 5,
+            "per_page": per_page,
         }
         try:
             r = requests.get(url, params=params, timeout=12)
@@ -143,13 +153,45 @@ class PixabayClient:
         return []
 
     def download_video(self, query: str, output_dir: Path, target_filename: Optional[str] = None) -> Optional[Path]:
-        hits = self.search_videos(query)
+        # Try full query first, then simplified fallback phrases if no hits found
+        query_clean = query.strip()
+        query_variants = [query_clean]
+        words = query_clean.split()
+        if len(words) > 2:
+            query_variants.append(" ".join(words[:2]))
+            query_variants.append(" ".join(words[-2:]))
+            query_variants.append(words[0])
+        elif len(words) == 2:
+            query_variants.append(words[0])
+            query_variants.append(words[1])
+
+        hits: List[Dict[str, Any]] = []
+        matched_query = query_clean
+        for q_try in query_variants:
+            hits = self.search_videos(q_try)
+            if hits:
+                matched_query = q_try
+                logger.info(f"[Pixabay] Found {len(hits)} video results for query variant '{q_try}'")
+                break
+
         if not hits:
+            logger.warning(f"[Pixabay] No video hits found for '{query}' or fallback variants")
             return None
+
+        # Prioritize portrait (height >= width) videos if available, otherwise pick best hit
         chosen = hits[0]
+        for h in hits:
+            vids = h.get("videos", {})
+            target_v = vids.get("large") or vids.get("medium") or {}
+            h_val = target_v.get("height", 0)
+            w_val = target_v.get("width", 0)
+            if h_val >= w_val and h_val > 0:
+                chosen = h
+                break
+
         vids = chosen.get("videos", {})
-        # Pick medium or large
-        target = vids.get("medium") or vids.get("large") or vids.get("small")
+        # Prefer large or medium quality MP4
+        target = vids.get("large") or vids.get("medium") or vids.get("small")
         if not target or not target.get("url"):
             return None
 
@@ -160,12 +202,14 @@ class PixabayClient:
         if out_file.exists() and out_file.stat().st_size > 50000:
             return out_file
 
+        logger.info(f"[Pixabay] Downloading video ID {chosen['id']} for '{matched_query}'...")
         try:
             r = requests.get(target["url"], stream=True, timeout=40)
             if r.status_code == 200:
                 with open(out_file, "wb") as f:
                     for chunk in r.iter_content(chunk_size=1024 * 64):
                         f.write(chunk)
+                logger.info(f"[+] Downloaded Pixabay clip: {out_file.name} ({out_file.stat().st_size // 1024} KB)")
                 return out_file
         except Exception as e:
             logger.warning(f"Failed downloading Pixabay video: {e}")

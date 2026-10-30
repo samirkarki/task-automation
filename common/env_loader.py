@@ -32,6 +32,9 @@ def load_project_env(custom_path: Optional[Path] = None, force_reload: bool = Fa
     root_dir = Path(__file__).resolve().parent.parent
     env_paths.append(root_dir / ".env")
 
+    # Check ayurveda orchestrator directory
+    env_paths.append(root_dir / "ayurveda-content" / "orchestrator" / ".env")
+
     # Check current working directory
     env_paths.append(Path.cwd() / ".env")
 

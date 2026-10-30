@@ -52,7 +52,7 @@ export const Captions: React.FC<CaptionsProps> = ({ words }) => {
     <div
       style={{
         position: "absolute",
-        bottom: 420,
+        bottom: 380,
         left: 0,
         right: 0,
         display: "flex",
@@ -60,6 +60,7 @@ export const Captions: React.FC<CaptionsProps> = ({ words }) => {
         alignItems: "center",
         padding: "0 40px",
         zIndex: 50,
+        pointerEvents: "none",
       }}
     >
       <div
@@ -68,13 +69,14 @@ export const Captions: React.FC<CaptionsProps> = ({ words }) => {
           flexWrap: "wrap",
           justifyContent: "center",
           alignItems: "center",
-          gap: "18px",
-          background: "rgba(10, 15, 20, 0.72)",
-          backdropFilter: "blur(12px)",
-          padding: "24px 44px",
-          borderRadius: "32px",
-          border: "2px solid rgba(255, 255, 255, 0.15)",
-          boxShadow: "0 20px 50px rgba(0, 0, 0, 0.6)",
+          gap: "24px",
+          background: "rgba(10, 15, 22, 0.82)",
+          backdropFilter: "blur(16px)",
+          padding: "20px 38px",
+          borderRadius: "28px",
+          border: "2px solid rgba(255, 255, 255, 0.18)",
+          boxShadow: "0 20px 50px rgba(0, 0, 0, 0.75), 0 0 30px rgba(0, 0, 0, 0.5)",
+          maxWidth: "960px",
         }}
       >
         {visibleWords.map((item, index) => {
@@ -91,24 +93,27 @@ export const Captions: React.FC<CaptionsProps> = ({ words }) => {
             },
           });
 
-          const scale = isActive ? interpolate(wordSpring, [0, 1], [1, 1.25]) : 1.0;
+          const scale = isActive ? interpolate(wordSpring, [0, 1], [1, 1.12]) : 1.0;
 
           return (
             <span
               key={`${item.word}-${globalIdx}`}
               style={{
                 fontFamily: "system-ui, -apple-system, sans-serif",
-                fontSize: "64px",
+                fontSize: "52px",
                 fontWeight: 900,
                 textTransform: "uppercase",
-                letterSpacing: "1px",
-                color: isActive ? "#FACC15" : "#FFFFFF",
+                letterSpacing: "2px",
+                color: isActive ? "#FACC15" : "rgba(255, 255, 255, 0.88)",
                 transform: `scale(${scale})`,
+                transformOrigin: "center center",
                 display: "inline-block",
+                margin: "0 10px",
+                whiteSpace: "nowrap",
                 transition: "color 0.1s ease",
                 textShadow: isActive
-                  ? "0 0 24px rgba(250, 204, 21, 0.8), 0 4px 12px rgba(0, 0, 0, 0.9)"
-                  : "0 4px 12px rgba(0, 0, 0, 0.9)",
+                  ? "0 0 20px rgba(250, 204, 21, 0.8), 0 4px 14px rgba(0, 0, 0, 0.95)"
+                  : "0 4px 14px rgba(0, 0, 0, 0.95)",
               }}
             >
               {item.word.trim()}

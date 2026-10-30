@@ -1,11 +1,18 @@
 import React from "react";
 import { Img, interpolate, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 
-interface BackgroundVideosProps {
-  clips: string[];
+export interface VideoSceneItem {
+  clip: string;
+  startFrame: number;
+  durationFrames: number;
 }
 
-export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [] }) => {
+interface BackgroundVideosProps {
+  clips: string[];
+  scenes?: VideoSceneItem[];
+}
+
+export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], scenes = [] }) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
 
@@ -14,8 +21,10 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [] }
     (c) => Boolean(c) && typeof c === "string" && c.trim() !== ""
   );
 
-  // If no clips are downloaded or available, render an organic ambient Ayurvedic gradient
-  if (validClips.length === 0) {
+  const hasScenes = scenes && scenes.length > 0;
+
+  // If no clips and no scenes are downloaded or available, render an organic ambient Ayurvedic gradient
+  if (!hasScenes && validClips.length === 0) {
     const pulse = interpolate(
       Math.sin((frame / 30) * 1.5),
       [-1, 1],
@@ -63,7 +72,22 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [] }
     );
   }
 
-  const framesPerClip = Math.ceil(durationInFrames / validClips.length);
+  const framesPerClip = validClips.length > 0 ? Math.ceil(durationInFrames / validClips.length) : durationInFrames;
+
+  // Build items array: prefer explicit frame-synced scenes, fallback to equal-length clips
+  const renderItems = hasScenes
+    ? scenes.map((s, idx) => ({
+        key: `scene-${s.clip}-${idx}`,
+        clipSrc: s.clip,
+        fromFrame: s.startFrame,
+        duration: s.durationFrames,
+      }))
+    : validClips.map((clipSrc, idx) => ({
+        key: `clip-${clipSrc}-${idx}`,
+        clipSrc,
+        fromFrame: idx * framesPerClip,
+        duration: framesPerClip,
+      }));
 
   return (
     <div
@@ -77,8 +101,8 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [] }
         backgroundColor: "#000000",
       }}
     >
-      {validClips.map((clipSrc, idx) => {
-        const fromFrame = idx * framesPerClip;
+      {renderItems.map((item, idx) => {
+        const { clipSrc, fromFrame, duration } = item;
         const resolvedSrc =
           clipSrc.startsWith("http") || clipSrc.startsWith("data:")
             ? clipSrc
@@ -87,9 +111,9 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [] }
 
         return (
           <Sequence
-            key={`${clipSrc}-${idx}`}
+            key={item.key}
             from={fromFrame}
-            durationInFrames={framesPerClip}
+            durationInFrames={duration}
           >
             <div
               style={{
@@ -117,7 +141,7 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [] }
                     height: "100%",
                     objectFit: "cover",
                     filter: "brightness(0.72) contrast(1.18)",
-                    transform: `scale(${1.04 + (idx % 2 === 0 ? 0.08 : -0.04) * ((frame - fromFrame) / framesPerClip)})`,
+                    transform: `scale(${1.04 + (idx % 2 === 0 ? 0.08 : -0.04) * ((frame - fromFrame) / Math.max(1, duration))})`,
                     transition: "transform 0.05s linear",
                   }}
                 />

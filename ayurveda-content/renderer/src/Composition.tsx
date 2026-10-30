@@ -1,14 +1,16 @@
 import React from "react";
 import { Audio, CalculateMetadataFunction, Composition, staticFile } from "remotion";
 import { Captions, WordData } from "./Captions";
-import { BackgroundVideos } from "./BackgroundVideos";
+import { BackgroundVideos, VideoSceneItem } from "./BackgroundVideos";
 import { HeaderBadge } from "./HeaderBadge";
 import { InfoCard, InfoCardData } from "./InfoCard";
 
 export interface AyurvedaShortProps {
+  [key: string]: unknown;
   audioSrc?: string;
   words?: WordData[];
   videoClips?: string[];
+  scenes?: VideoSceneItem[];
   badgeText?: string;
   topicTitle?: string;
   cards?: InfoCardData[];
@@ -64,6 +66,7 @@ export const AyurvedaShort: React.FC<AyurvedaShortProps> = ({
   audioSrc,
   words = [],
   videoClips = [],
+  scenes = [],
   badgeText = "AYURVEDA SECRETS",
   topicTitle,
   cards = [],
@@ -79,7 +82,7 @@ export const AyurvedaShort: React.FC<AyurvedaShortProps> = ({
       }}
     >
       {/* 1. Cinematic Background Montage or Ambient Motion Canvas */}
-      <BackgroundVideos clips={videoClips} />
+      <BackgroundVideos clips={videoClips} scenes={scenes} />
 
       {/* 2. Top Category Badge & Glowing Progress Indicator */}
       <HeaderBadge badgeText={badgeText} topicTitle={topicTitle} />
