@@ -1,0 +1,499 @@
+{
+  "text": " Constantly stressed and exhausted, Ayurveda holds the ancient secret to modern calm. Meet Ashwaganta, the king of adaptogenic herbs. It regulates cortisol levels, naturally easing anxiety while revitalizing your energy without mid-day jitters. Take it with warm milk before sleep. Subscribe for daily Ayurvedic remedies to balance your doshas.",
+  "segments": [
+    {
+      "id": 0,
+      "seek": 0,
+      "start": 0.0,
+      "end": 1.94,
+      "text": " Constantly stressed and exhausted,",
+      "tokens": [
+        50364,
+        8574,
+        3627,
+        14471,
+        293,
+        17992,
+        11,
+        50485
+      ],
+      "temperature": 0.0,
+      "avg_logprob": -0.27369512065073076,
+      "compression_ratio": 1.4721030042918455,
+      "no_speech_prob": 0.0204436294734478,
+      "words": [
+        {
+          "word": " Constantly",
+          "start": 0.0,
+          "end": 0.76,
+          "probability": 0.9357141852378845
+        },
+        {
+          "word": " stressed",
+          "start": 0.76,
+          "end": 1.1,
+          "probability": 0.9862022995948792
+        },
+        {
+          "word": " and",
+          "start": 1.1,
+          "end": 1.44,
+          "probability": 0.9892643094062805
+        },
+        {
+          "word": " exhausted,",
+          "start": 1.44,
+          "end": 1.94,
+          "probability": 0.9924690127372742
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "seek": 0,
+      "start": 2.64,
+      "end": 5.1,
+      "text": " Ayurveda holds the ancient secret to modern calm.",
+      "tokens": [
+        50485,
+        9081,
+        374,
+        45716,
+        9190,
+        264,
+        7832,
+        4054,
+        281,
+        4363,
+        7151,
+        13,
+        50648
+      ],
+      "temperature": 0.0,
+      "avg_logprob": -0.27369512065073076,
+      "compression_ratio": 1.4721030042918455,
+      "no_speech_prob": 0.0204436294734478,
+      "words": [
+        {
+          "word": " Ayurveda",
+          "start": 2.64,
+          "end": 2.92,
+          "probability": 0.8707768718401591
+        },
+        {
+          "word": " holds",
+          "start": 2.92,
+          "end": 3.28,
+          "probability": 0.99810791015625
+        },
+        {
+          "word": " the",
+          "start": 3.28,
+          "end": 3.52,
+          "probability": 0.996156632900238
+        },
+        {
+          "word": " ancient",
+          "start": 3.52,
+          "end": 3.84,
+          "probability": 0.9888796806335449
+        },
+        {
+          "word": " secret",
+          "start": 3.84,
+          "end": 4.24,
+          "probability": 0.9986057877540588
+        },
+        {
+          "word": " to",
+          "start": 4.24,
+          "end": 4.48,
+          "probability": 0.9981188178062439
+        },
+        {
+          "word": " modern",
+          "start": 4.48,
+          "end": 4.8,
+          "probability": 0.992419421672821
+        },
+        {
+          "word": " calm.",
+          "start": 4.8,
+          "end": 5.1,
+          "probability": 0.4330655634403229
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "seek": 0,
+      "start": 5.94,
+      "end": 8.94,
+      "text": " Meet Ashwaganta, the king of adaptogenic herbs.",
+      "tokens": [
+        50648,
+        22963,
+        10279,
+        86,
+        559,
+        5983,
+        11,
+        264,
+        4867,
+        295,
+        6231,
+        25473,
+        21426,
+        13,
+        50831
+      ],
+      "temperature": 0.0,
+      "avg_logprob": -0.27369512065073076,
+      "compression_ratio": 1.4721030042918455,
+      "no_speech_prob": 0.0204436294734478,
+      "words": [
+        {
+          "word": " Meet",
+          "start": 5.94,
+          "end": 6.06,
+          "probability": 0.5738354921340942
+        },
+        {
+          "word": " Ashwaganta,",
+          "start": 6.06,
+          "end": 6.84,
+          "probability": 0.8089869469404221
+        },
+        {
+          "word": " the",
+          "start": 7.26,
+          "end": 7.36,
+          "probability": 0.9745101928710938
+        },
+        {
+          "word": " king",
+          "start": 7.36,
+          "end": 7.58,
+          "probability": 0.710741400718689
+        },
+        {
+          "word": " of",
+          "start": 7.58,
+          "end": 7.82,
+          "probability": 0.9987874627113342
+        },
+        {
+          "word": " adaptogenic",
+          "start": 7.82,
+          "end": 8.54,
+          "probability": 0.9290845394134521
+        },
+        {
+          "word": " herbs.",
+          "start": 8.54,
+          "end": 8.94,
+          "probability": 0.9954817295074463
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "seek": 0,
+      "start": 9.44,
+      "end": 12.96,
+      "text": " It regulates cortisol levels, naturally easing anxiety",
+      "tokens": [
+        50831,
+        467,
+        9837,
+        1024,
+        45618,
+        4358,
+        11,
+        8195,
+        1195,
+        278,
+        9119,
+        51019
+      ],
+      "temperature": 0.0,
+      "avg_logprob": -0.27369512065073076,
+      "compression_ratio": 1.4721030042918455,
+      "no_speech_prob": 0.0204436294734478,
+      "words": [
+        {
+          "word": " It",
+          "start": 9.44,
+          "end": 9.64,
+          "probability": 0.99712735414505
+        },
+        {
+          "word": " regulates",
+          "start": 9.64,
+          "end": 10.2,
+          "probability": 0.9950689077377319
+        },
+        {
+          "word": " cortisol",
+          "start": 10.2,
+          "end": 10.64,
+          "probability": 0.8367517590522766
+        },
+        {
+          "word": " levels,",
+          "start": 10.64,
+          "end": 11.18,
+          "probability": 0.9967567324638367
+        },
+        {
+          "word": " naturally",
+          "start": 11.6,
+          "end": 11.96,
+          "probability": 0.9937834739685059
+        },
+        {
+          "word": " easing",
+          "start": 11.96,
+          "end": 12.5,
+          "probability": 0.9744991958141327
+        },
+        {
+          "word": " anxiety",
+          "start": 12.5,
+          "end": 12.96,
+          "probability": 0.9981185793876648
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "seek": 0,
+      "start": 12.96,
+      "end": 15.7,
+      "text": " while revitalizing your energy without mid-day jitters.",
+      "tokens": [
+        51019,
+        1339,
+        42457,
+        3319,
+        428,
+        2281,
+        1553,
+        2062,
+        12,
+        810,
+        361,
+        38873,
+        13,
+        51176
+      ],
+      "temperature": 0.0,
+      "avg_logprob": -0.27369512065073076,
+      "compression_ratio": 1.4721030042918455,
+      "no_speech_prob": 0.0204436294734478,
+      "words": [
+        {
+          "word": " while",
+          "start": 12.96,
+          "end": 13.34,
+          "probability": 0.7737107872962952
+        },
+        {
+          "word": " revitalizing",
+          "start": 13.34,
+          "end": 14.1,
+          "probability": 0.9780643880367279
+        },
+        {
+          "word": " your",
+          "start": 14.1,
+          "end": 14.26,
+          "probability": 0.9969305396080017
+        },
+        {
+          "word": " energy",
+          "start": 14.26,
+          "end": 14.64,
+          "probability": 0.9995524287223816
+        },
+        {
+          "word": " without",
+          "start": 14.64,
+          "end": 15.0,
+          "probability": 0.9936234354972839
+        },
+        {
+          "word": " mid",
+          "start": 15.0,
+          "end": 15.26,
+          "probability": 0.9932363629341125
+        },
+        {
+          "word": "-day",
+          "start": 15.26,
+          "end": 15.42,
+          "probability": 0.7264250069856644
+        },
+        {
+          "word": " jitters.",
+          "start": 15.42,
+          "end": 15.7,
+          "probability": 0.8978006839752197
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "seek": 0,
+      "start": 16.34,
+      "end": 18.28,
+      "text": " Take it with warm milk before sleep.",
+      "tokens": [
+        51176,
+        3664,
+        309,
+        365,
+        4561,
+        5392,
+        949,
+        2817,
+        13,
+        51296
+      ],
+      "temperature": 0.0,
+      "avg_logprob": -0.27369512065073076,
+      "compression_ratio": 1.4721030042918455,
+      "no_speech_prob": 0.0204436294734478,
+      "words": [
+        {
+          "word": " Take",
+          "start": 16.34,
+          "end": 16.6,
+          "probability": 0.9933695793151855
+        },
+        {
+          "word": " it",
+          "start": 16.6,
+          "end": 16.72,
+          "probability": 0.99810791015625
+        },
+        {
+          "word": " with",
+          "start": 16.72,
+          "end": 16.88,
+          "probability": 0.998702883720398
+        },
+        {
+          "word": " warm",
+          "start": 16.88,
+          "end": 17.22,
+          "probability": 0.9917044639587402
+        },
+        {
+          "word": " milk",
+          "start": 17.22,
+          "end": 17.58,
+          "probability": 0.997810423374176
+        },
+        {
+          "word": " before",
+          "start": 17.58,
+          "end": 17.88,
+          "probability": 0.9944251775741577
+        },
+        {
+          "word": " sleep.",
+          "start": 17.88,
+          "end": 18.28,
+          "probability": 0.9519713521003723
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "seek": 0,
+      "start": 18.86,
+      "end": 22.24,
+      "text": " Subscribe for daily Ayurvedic remedies to balance your doshas.",
+      "tokens": [
+        51296,
+        10611,
+        337,
+        5212,
+        9081,
+        374,
+        937,
+        299,
+        47133,
+        281,
+        4772,
+        428,
+        4491,
+        12438,
+        13,
+        51496
+      ],
+      "temperature": 0.0,
+      "avg_logprob": -0.27369512065073076,
+      "compression_ratio": 1.4721030042918455,
+      "no_speech_prob": 0.0204436294734478,
+      "words": [
+        {
+          "word": " Subscribe",
+          "start": 18.86,
+          "end": 19.26,
+          "probability": 0.9857595562934875
+        },
+        {
+          "word": " for",
+          "start": 19.26,
+          "end": 19.6,
+          "probability": 0.9962375164031982
+        },
+        {
+          "word": " daily",
+          "start": 19.6,
+          "end": 19.98,
+          "probability": 0.9985774755477905
+        },
+        {
+          "word": " Ayurvedic",
+          "start": 19.98,
+          "end": 20.76,
+          "probability": 0.9871152639389038
+        },
+        {
+          "word": " remedies",
+          "start": 20.76,
+          "end": 21.06,
+          "probability": 0.958161473274231
+        },
+        {
+          "word": " to",
+          "start": 21.06,
+          "end": 21.36,
+          "probability": 0.9989965558052063
+        },
+        {
+          "word": " balance",
+          "start": 21.36,
+          "end": 21.68,
+          "probability": 0.9981639981269836
+        },
+        {
+          "word": " your",
+          "start": 21.68,
+          "end": 21.9,
+          "probability": 0.9984833598136902
+        },
+        {
+          "word": " doshas.",
+          "start": 21.9,
+          "end": 22.24,
+          "probability": 0.505476176738739
+        }
+      ]
+    }
+  ],
+  "language": "en"
+}

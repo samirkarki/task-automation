@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from narrative_warfare.env_loader import load_project_env
+from common.env_loader import load_project_env
 load_project_env()
 
 from narrative_warfare.premium_video_engine import main

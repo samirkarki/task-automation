@@ -1,0 +1,7 @@
+requests
+moviepy
+imageio-ffmpeg
+kokoro
+soundfile
+torch
+openai-whisper

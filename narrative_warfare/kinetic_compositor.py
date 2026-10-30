@@ -24,7 +24,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from narrative_warfare.env_loader import load_project_env
+from common.env_loader import load_project_env
 
 # Guarantee environment variables from .env are loaded
 load_project_env()
@@ -42,7 +42,7 @@ from narrative_warfare.media_director import (
     VisualBeat,
 )
 from narrative_warfare.whisper_transcriber import SubtitleCard
-from faceless_content.moviepy_compat import (
+from common.moviepy_compat import (
     VideoClip,
     VideoFileClip,
     AudioFileClip,

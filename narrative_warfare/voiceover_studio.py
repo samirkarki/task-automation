@@ -152,7 +152,7 @@ def synthesize_edge_tts_voice(
 
     # Convert temp mp3 to standardized wav using moviepy or ffmpeg or pydub
     # If moviepy is available:
-    from faceless_content.moviepy_compat import AudioFileClip
+    from common.moviepy_compat import AudioFileClip
     clip = AudioFileClip(str(temp_mp3))
     raw_wav = output_wav.parent / "temp_unnorm.wav"
     clip.write_audiofile(str(raw_wav), fps=24000, nbytes=2, codec="pcm_s16le", logger=None)

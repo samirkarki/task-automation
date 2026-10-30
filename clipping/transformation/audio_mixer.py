@@ -49,7 +49,7 @@ def compose_clip_audio(commentary_audio_path: Path, output_master_path: Path) ->
     output_master_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        from faceless_content.moviepy_compat import (
+        from common.moviepy_compat import (
             AudioFileClip,
             CompositeAudioClip,
             scale_clip_volume,

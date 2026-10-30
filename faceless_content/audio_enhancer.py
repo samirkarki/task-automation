@@ -67,7 +67,7 @@ def compose_master_audio(voiceover_path: Path, output_master_path: Path) -> Path
     Loads voiceover audio, generates a synchronized ambient bed,
     and composites them into a balanced master audio track using MoviePy.
     """
-    from faceless_content.moviepy_compat import (
+    from common.moviepy_compat import (
         AudioFileClip,
         CompositeAudioClip,
         scale_clip_volume,

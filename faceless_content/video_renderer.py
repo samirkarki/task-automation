@@ -101,7 +101,7 @@ def render_short_video(
     - Hormozi-style highlighted captions
     - Audio ducking with ambient bed
     """
-    from faceless_content.moviepy_compat import (
+    from common.moviepy_compat import (
         AudioFileClip,
         VideoClip,
         ImageClip,
