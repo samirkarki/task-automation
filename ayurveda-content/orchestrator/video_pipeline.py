@@ -33,6 +33,7 @@ from common.tts_engine import synthesize_with_kokoro, synthesize_with_edge
 from common.whisper_utils import transcribe_audio_words
 from common.stock_media import download_batch_stock_videos
 from common.publishing import publish_to_all_platforms
+from common.audio_mastering import master_voice_with_ambient
 
 from topic_catalog import pick_random_topic, generate_title_variants, CATEGORIES
 from analytics_feedback import AyurvedaAnalyticsDB, FeedbackOptimizer
@@ -120,21 +121,29 @@ def generate_video_assets(
     eng_script = script_json.get("english_script", {})
     combined_text = f"{eng_script.get('hook', '')} {eng_script.get('body', '')} {eng_script.get('cta', '')}".strip()
 
-    audio_path = work_dir / "voiceover.wav"
+    raw_voice_path = work_dir / "voiceover_raw.wav"
+    mastered_audio_path = work_dir / "voiceover_master.wav"
     try:
         synthesize_with_kokoro(
             text=combined_text,
-            output_path=audio_path,
+            output_path=raw_voice_path,
             voice="af_heart",
             lang_code="a",
         )
     except Exception as tts_err:
         logger.warning(f"Kokoro TTS offline ({tts_err}). Falling back to Edge-TTS...")
-        synthesize_with_edge(text=combined_text, output_path=audio_path)
+        synthesize_with_edge(text=combined_text, output_path=raw_voice_path)
+
+    # Master audio with deep 432Hz ambient frequency bed (-22dB) for documentary feel
+    try:
+        master_voice_with_ambient(voice_wav=raw_voice_path, output_wav=mastered_audio_path, ambient_db=-22.0)
+    except Exception as master_err:
+        logger.warning(f"Audio mastering fallback to raw: {master_err}")
+        mastered_audio_path = raw_voice_path
 
     # 4. Generate Word-Level Subtitles via Whisper
     subtitles_path = work_dir / "subtitles.json"
-    whisper_result = transcribe_audio_words(audio_path=audio_path, output_json_path=subtitles_path)
+    whisper_result = transcribe_audio_words(audio_path=mastered_audio_path, output_json_path=subtitles_path)
 
     # Flatten word timestamps for Remotion
     words_list: List[Dict[str, Any]] = []
@@ -146,20 +155,40 @@ def generate_video_assets(
                 "end": round(float(w.get("end", 0.0)), 2),
             })
 
-    # 5. Fetch 9:16 Portrait Stock Footage
-    stock_queries = script_json.get("visual_search_queries") or selected_topic.get("keywords") or ["ayurveda herbs", "nature meditation"]
+    # 5. Fetch Visual Footage or Fallback to Procedural Canvas
+    stock_queries = script_json.get("visual_search_queries") or selected_topic.get("keywords") or ["ayurveda herbs"]
     stock_clips_dir = work_dir / "clips"
     downloaded_clips = download_batch_stock_videos(queries=stock_queries, output_dir=stock_clips_dir)
 
     duration_sec = float(whisper_result.get("segments", [{}])[-1].get("end", 30.0)) if whisper_result.get("segments") else 30.0
+    fps = 30
+
+    # 6. Construct Educational Infographic Cards
+    cards = [
+        {
+            "type": "warning",
+            "title": f"The Mistake: {selected_topic['subject'][:45]}",
+            "subtitle": f"Imbalances {selected_topic.get('dosha', 'Tridosha')} and accumulates internal toxins (Ama).",
+            "startFrame": int(1.5 * fps),
+            "durationFrames": int(4.5 * fps),
+        },
+        {
+            "type": "remedy",
+            "title": "The Ancient Ayurvedic Rule",
+            "subtitle": f"{selected_topic.get('key_fact', 'Restore gut Agni naturally.')[:80]}",
+            "startFrame": int(6.5 * fps),
+            "durationFrames": int(5.0 * fps),
+        },
+    ]
 
     return {
         "work_dir": work_dir,
         "topic": selected_topic,
         "script": script_json,
-        "audio_path": audio_path,
+        "audio_path": mastered_audio_path,
         "subtitles_path": subtitles_path,
         "words": words_list,
+        "cards": cards,
         "stock_clips": [str(c) for c in downloaded_clips],
         "duration_sec": duration_sec,
     }
@@ -180,6 +209,7 @@ def render_remotion_video(
         "videoClips": assets["stock_clips"],
         "badgeText": assets["topic"].get("badge", "AYURVEDA SECRETS"),
         "topicTitle": assets["topic"].get("subject", ""),
+        "cards": assets.get("cards", []),
         "durationInSeconds": assets["duration_sec"],
     }
 
