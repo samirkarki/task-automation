@@ -12,6 +12,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+# Globally disable cuDNN right after importing PyTorch to prevent CUDNN_STATUS_NOT_INITIALIZED
+import torch
+torch.backends.cudnn.enabled = False
+
 from common.env_loader import load_project_env
 
 load_project_env()
@@ -59,20 +63,47 @@ def transcribe_audio_words(
     """
     Transcribes audio file using OpenAI Whisper with word_timestamps=True.
     Optionally exports strictly to output_json_path.
+    Verifies audio transcription model initializes properly on cuda (with cuDNN disabled),
+    falling back gracefully to cpu if CUDA allocation, convolution, or feature extraction fails.
     """
     import torch
     import whisper
 
+    torch.backends.cudnn.enabled = False
     ensure_ffmpeg_on_path()
 
     m_size = model_size or DEFAULT_MODEL_SIZE
     dev = device or (DEFAULT_DEVICE if torch.cuda.is_available() else "cpu")
 
-    logger.info(f"Loading Whisper '{m_size}' model on device='{dev}'...")
-    model = whisper.load_model(m_size, device=dev)
+    model = None
+    result = None
 
-    logger.info(f"Transcribing '{audio_path}' with word_timestamps=True...")
-    result = model.transcribe(str(audio_path), word_timestamps=True)
+    if dev.startswith("cuda"):
+        try:
+            logger.info(f"Loading Whisper '{m_size}' model on device='{dev}' (cuDNN disabled)...")
+            model = whisper.load_model(m_size, device=dev)
+            logger.info(f"Transcribing '{audio_path}' with word_timestamps=True on device='{dev}'...")
+            result = model.transcribe(str(audio_path), word_timestamps=True)
+        except Exception as cuda_err:
+            logger.warning(
+                f"Whisper CUDA execution failed on '{dev}' ({cuda_err}). "
+                "Gracefully falling back to device='cpu'..."
+            )
+            if model is not None:
+                del model
+                model = None
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+            dev = "cpu"
+
+    if result is None:
+        logger.info(f"Loading Whisper '{m_size}' model on device='cpu'...")
+        model = whisper.load_model(m_size, device="cpu")
+        logger.info(f"Transcribing '{audio_path}' with word_timestamps=True on device='cpu'...")
+        result = model.transcribe(str(audio_path), word_timestamps=True)
 
     if output_json_path:
         out_p = Path(output_json_path).resolve()

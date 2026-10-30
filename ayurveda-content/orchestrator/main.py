@@ -20,6 +20,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Globally disable cuDNN right after importing PyTorch to prevent CUDNN_STATUS_NOT_INITIALIZED
+import torch
+torch.backends.cudnn.enabled = False
+
 # Ensure UTF-8 output on Windows terminals for Unicode/Hindi characters
 if sys.platform == "win32":
     try:

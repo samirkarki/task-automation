@@ -10,8 +10,12 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, List
 import numpy as np
+
+# Globally disable cuDNN right after importing PyTorch to prevent CUDNN_STATUS_NOT_INITIALIZED
+import torch
+torch.backends.cudnn.enabled = False
 
 from common.env_loader import load_project_env
 
@@ -31,10 +35,14 @@ def synthesize_with_kokoro(
     """
     Synthesize audio using local Kokoro TTS pipeline.
     Exports 24,000 Hz WAV.
+    Allows Kokoro to run on cuda with cuDNN disabled, falling back gracefully
+    to device='cpu' if any GPU initialization or runtime error occurs.
     """
     import soundfile as sf
     import torch
     from kokoro import KPipeline
+
+    torch.backends.cudnn.enabled = False
 
     target_path = Path(output_path).resolve()
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,20 +50,39 @@ def synthesize_with_kokoro(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    logger.info(f"Synthesizing Kokoro audio (voice='{voice}', lang='{lang_code}', device='{device}')...")
-    pipeline = KPipeline(lang_code=lang_code, device=device)
+    def _run_synthesis(target_dev: str) -> List[np.ndarray]:
+        logger.info(f"Synthesizing Kokoro audio (voice='{voice}', lang='{lang_code}', device='{target_dev}')...")
+        pipeline = KPipeline(lang_code=lang_code, device=target_dev)
+        chunks: List[np.ndarray] = []
+        generator = pipeline(text, voice=voice, speed=speed)
+        for result in generator:
+            if result.output is not None and result.output.audio is not None:
+                chunk = result.output.audio
+                if isinstance(chunk, torch.Tensor):
+                    chunk = chunk.detach().cpu().numpy()
+                chunks.append(chunk)
 
-    audio_chunks = []
-    generator = pipeline(text, voice=voice, speed=speed)
-    for result in generator:
-        if result.output is not None and result.output.audio is not None:
-            chunk = result.output.audio
-            if isinstance(chunk, torch.Tensor):
-                chunk = chunk.detach().cpu().numpy()
-            audio_chunks.append(chunk)
+        if not chunks:
+            raise RuntimeError("Kokoro TTS did not yield any audio output.")
+        return chunks
 
-    if not audio_chunks:
-        raise RuntimeError("Kokoro TTS did not yield any audio output.")
+    audio_chunks: List[np.ndarray] = []
+    if device.startswith("cuda"):
+        try:
+            audio_chunks = _run_synthesis(device)
+        except Exception as gpu_err:
+            logger.warning(
+                f"Kokoro GPU execution failed on '{device}' ({gpu_err}). "
+                "Gracefully falling back to device='cpu'..."
+            )
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+            audio_chunks = _run_synthesis("cpu")
+    else:
+        audio_chunks = _run_synthesis(device)
 
     full_audio = np.concatenate(audio_chunks, axis=0)
     sf.write(str(target_path), full_audio, 24000)
