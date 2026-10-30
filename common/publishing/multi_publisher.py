@@ -19,6 +19,7 @@ def publish_to_all_platforms(
     video_path: Path,
     metadata: Dict[str, Any],
     video_public_url: Optional[str] = None,
+    privacy: str = "public",
     dry_run: bool = False,
 ) -> Dict[str, Optional[str]]:
     """
@@ -33,7 +34,7 @@ def publish_to_all_platforms(
 
     # 1. YouTube Shorts
     try:
-        results["youtube"] = upload_short_to_youtube(video_path, metadata, dry_run=dry_run)
+        results["youtube"] = upload_short_to_youtube(video_path, metadata, privacy=privacy, dry_run=dry_run)
     except Exception as e:
         logger.error(f"YouTube publishing failed: {e}")
 

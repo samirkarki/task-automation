@@ -18,11 +18,13 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 logger = logging.getLogger("common.publishing.youtube")
 
 SECRETS_DIR = Path(__file__).resolve().parent.parent.parent / "secrets"
-DEFAULT_CLIENT_SECRETS = str(SECRETS_DIR / "client_secrets.json")
+_found_secret = SECRETS_DIR / "client_secret.json" if (SECRETS_DIR / "client_secret.json").exists() else SECRETS_DIR / "client_secrets.json"
+DEFAULT_CLIENT_SECRETS = str(_found_secret)
 DEFAULT_TOKEN_FILE = str(SECRETS_DIR / "youtube_token.json")
 
 YOUTUBE_CLIENT_SECRETS = os.getenv("YOUTUBE_CLIENT_SECRETS_FILE", DEFAULT_CLIENT_SECRETS)
 YOUTUBE_TOKEN_FILE = os.getenv("YOUTUBE_TOKEN_FILE", DEFAULT_TOKEN_FILE)
+DEFAULT_PRIVACY = os.getenv("YOUTUBE_PRIVACY_STATUS", "public")
 YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.force-ssl",
@@ -83,7 +85,7 @@ def get_authenticated_service():
 def upload_short_to_youtube(
     video_path: Path,
     metadata: Dict[str, Any],
-    privacy: str = "public",
+    privacy: Optional[str] = None,
     dry_run: bool = False,
 ) -> Optional[str]:
     """Uploads vertical MP4 to YouTube Shorts."""
@@ -91,6 +93,10 @@ def upload_short_to_youtube(
     if not video_path.exists():
         logger.error(f"Video file not found: {video_path}")
         return None
+
+    privacy_status = (privacy or DEFAULT_PRIVACY).lower()
+    if privacy_status not in ("public", "unlisted", "private"):
+        privacy_status = "public"
 
     title = metadata.get("title", metadata.get("title_a", "Ayurvedic Insights #Shorts"))
     if "#Shorts" not in title and "#shorts" not in title:
@@ -120,7 +126,7 @@ def upload_short_to_youtube(
                 "categoryId": "26",
             },
             "status": {
-                "privacyStatus": privacy,
+                "privacyStatus": privacy_status,
                 "selfDeclaredMadeForKids": False,
             },
         }

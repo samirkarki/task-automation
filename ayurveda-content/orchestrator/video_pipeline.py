@@ -396,6 +396,7 @@ def run_ayurveda_pipeline(
     category_key: Optional[str] = None,
     publish: bool = False,
     dry_run_publish: bool = True,
+    privacy: str = "public",
 ) -> Dict[str, Any]:
     """Runs the complete end-to-end automated generation, rendering, and logging flow."""
     logger.info("=== Starting Ayurveda Video Pipeline ===")
@@ -432,7 +433,7 @@ def run_ayurveda_pipeline(
 
     # Step 5: Multi-Platform Publishing
     if publish:
-        logger.info(f"Publishing to YouTube, TikTok, and Instagram (dry_run={dry_run_publish})...")
+        logger.info(f"Publishing to YouTube, TikTok, and Instagram (dry_run={dry_run_publish}, privacy={privacy})...")
         pub_results = publish_to_all_platforms(
             video_path=output_video,
             metadata={
@@ -440,6 +441,7 @@ def run_ayurveda_pipeline(
                 "description": f"{assets['script'].get('english_script', {}).get('body', '')}\n\n#Ayurveda #Wellness #Health #Dosha #Shorts",
                 "tags": ["Ayurveda", "Health", "DailyRoutine", "HolisticHealth", "Shorts"],
             },
+            privacy=privacy,
             dry_run=dry_run_publish,
         )
         record_data["youtube_url"] = f"https://youtu.be/{pub_results.get('youtube')}" if pub_results.get("youtube") else ""
@@ -461,11 +463,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ayurveda Content Automation Pipeline")
     parser.add_argument("--category", type=str, default=None, help="Optional category key")
     parser.add_argument("--publish", action="store_true", help="Publish video to social platforms")
-    parser.add_argument("--live", action="store_true", help="Perform real publish (otherwise dry-run)")
+    parser.add_argument("--live", action="store_true", help="Perform real live publish (without this, publishing is dry-run)")
+    parser.add_argument("--privacy", type=str, choices=["public", "unlisted", "private"], default="public", help="YouTube upload privacy status (default: public)")
     args = parser.parse_args()
 
     run_ayurveda_pipeline(
         category_key=args.category,
         publish=args.publish,
         dry_run_publish=not args.live,
+        privacy=args.privacy,
     )
