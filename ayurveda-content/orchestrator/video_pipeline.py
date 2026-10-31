@@ -42,6 +42,7 @@ from common.audio_mastering import master_voice_with_ambient
 
 from topic_catalog import pick_random_topic, generate_title_variants, CATEGORIES
 from analytics_feedback import AyurvedaAnalyticsDB, FeedbackOptimizer
+from ai_visuals import is_comfyui_available, generate_scene_visuals, COMFYUI_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ayurveda.pipeline")
@@ -213,20 +214,39 @@ def generate_video_assets(
         "stomach digestion gut anatomy",
         "drinking cold water table",
         "bloated stomach pain belly",
+        "fermentation gut health",
         "pouring hot steaming herbal tea",
         "fresh ginger root slicing kitchen",
+        "healthy energetic smiling person",
     ]
+
+    # Check ComfyUI (defaults to http://0.0.0.0:8188/ unless overridden by COMFYUI_URL)
+    ai_frames: List[Path] = []
+    if is_comfyui_available():
+        logger.info(f"[*] ComfyUI server detected at {COMFYUI_URL}! Generating bespoke photorealistic frames...")
+        ai_paths = generate_scene_visuals(
+            topic_data=selected_topic,
+            output_dir=work_dir / "ai_visuals",
+            queries=stock_queries,
+        )
+        ai_frames = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
+
     stock_clips_dir = work_dir / "clips"
     downloaded_clips = download_batch_stock_videos(queries=stock_queries, output_dir=stock_clips_dir)
+
+    # Combine bespoke AI frames with stock video clips (AI frames prioritized)
+    visual_clips: List[Path] = ai_frames + downloaded_clips
+    if not visual_clips:
+        logger.warning("No visual clips available from ComfyUI or stock APIs; using procedural canvas fallback.")
 
     segments = whisper_result.get("segments", [])
     duration_sec = float(segments[-1].get("end", 45.0)) if segments else 45.0
     fps = 30
 
     # 6. Construct Frame-Synchronized Visual Scenes
-    # Maps each downloaded clip directly to spoken sentence segments so cuts are time-accurate
+    # Maps each clip directly to spoken sentence segments so cuts are time-accurate
     scenes: List[Dict[str, Any]] = []
-    num_clips = len(downloaded_clips)
+    num_clips = len(visual_clips)
     if num_clips > 0 and segments:
         clip_idx = 0
         current_scene_start = 0.0
@@ -241,7 +261,7 @@ def generate_video_assets(
                 start_f = int(current_scene_start * fps)
                 end_f = int(seg_end * fps)
                 dur_f = max(fps * 2, end_f - start_f)
-                assigned_clip = downloaded_clips[clip_idx % num_clips]
+                assigned_clip = visual_clips[clip_idx % num_clips]
 
                 scenes.append({
                     "clip": str(assigned_clip),
@@ -253,7 +273,7 @@ def generate_video_assets(
     elif num_clips > 0:
         # Fallback if Whisper returned no segments: divide evenly
         frames_per = int(duration_sec * fps / num_clips)
-        for idx, clip in enumerate(downloaded_clips):
+        for idx, clip in enumerate(visual_clips):
             scenes.append({
                 "clip": str(clip),
                 "startFrame": idx * frames_per,
@@ -298,7 +318,7 @@ def generate_video_assets(
         "words": words_list,
         "scenes": scenes,
         "cards": cards,
-        "stock_clips": [str(c) for c in downloaded_clips],
+        "stock_clips": [str(c) for c in visual_clips],
         "duration_sec": duration_sec,
     }
 
@@ -322,12 +342,12 @@ def render_remotion_video(
     else:
         staged_audio_name = ""
 
-    # Stage visual clips if any (preserve actual extension .mp4 / .jpg)
+    # Stage visual clips if any (preserve actual extension .mp4 / .jpg / .png)
     staged_clips: List[str] = []
     clip_map: Dict[str, str] = {}
     for idx, clip in enumerate(assets.get("stock_clips", [])):
         clip_p = Path(clip)
-        if clip_p.exists() and clip_p.stat().st_size > 10000:
+        if clip_p.exists() and clip_p.stat().st_size > 1000:
             ext = clip_p.suffix.lower() if clip_p.suffix else ".mp4"
             c_name = f"clip_{session_id}_{idx}{ext}"
             shutil.copyfile(str(clip_p), str(public_dir / c_name))

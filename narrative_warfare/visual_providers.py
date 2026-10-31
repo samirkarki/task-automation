@@ -356,16 +356,28 @@ class ComfyUIProvider(BaseVisualProvider):
     name = "comfyui"
 
     def __init__(self, endpoint: Optional[str] = None):
-        self.endpoint = endpoint or os.getenv("COMFYUI_URL", "http://localhost:8188")
+        self.endpoint = (endpoint or os.getenv("COMFYUI_URL", "http://0.0.0.0:8188/")).strip().rstrip("/")
+
+    def _get_candidate_endpoints(self) -> List[str]:
+        raw = self.endpoint
+        endpoints = [raw]
+        if "0.0.0.0" in raw:
+            endpoints.append(raw.replace("0.0.0.0", "127.0.0.1"))
+        elif "127.0.0.1" in raw:
+            endpoints.append(raw.replace("127.0.0.1", "0.0.0.0"))
+        return endpoints
 
     def is_available(self) -> bool:
-        if not os.getenv("ENABLE_COMFYUI", "").strip():
+        if os.getenv("ENABLE_COMFYUI", "true").lower() == "false":
             return False
-        try:
-            r = requests.get(f"{self.endpoint}/system_stats", timeout=2)
-            return r.status_code == 200
-        except Exception:
-            return False
+        for ep in self._get_candidate_endpoints():
+            try:
+                r = requests.get(f"{ep}/system_stats", timeout=2)
+                if r.status_code == 200:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def fetch_visual(
         self,
@@ -376,7 +388,32 @@ class ComfyUIProvider(BaseVisualProvider):
         seed: int,
         output_dir: Path,
     ) -> Optional[VisualAsset]:
-        # Connects to ComfyUI workflow endpoint if configured
+        if not self.is_available():
+            return None
+
+        prompt = (
+            ai_prompt.strip()
+            or f"cinematic dark corporate warfare photo of {search_query}, 35mm film, 8k, photorealistic"
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = output_dir / f"comfy_{abs(hash(prompt)) % 100000}_{seed}.jpg"
+        if cache_file.exists() and cache_file.stat().st_size > 1000:
+            return VisualAsset(file_path=cache_file, media_type="image", source_provider=self.name)
+
+        try:
+            import importlib.util
+            ai_vis_path = Path(__file__).resolve().parent.parent / "ayurveda-content" / "orchestrator" / "ai_visuals.py"
+            if ai_vis_path.exists():
+                spec = importlib.util.spec_from_file_location("ayurveda_ai_visuals", ai_vis_path)
+                if spec and spec.loader:
+                    ai_vis = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(ai_vis)
+                    res = ai_vis.generate_comfyui_image(prompt_text=prompt, output_path=cache_file, base_url=self.endpoint)
+                    if res and cache_file.exists() and cache_file.stat().st_size > 1000:
+                        return VisualAsset(file_path=cache_file, media_type="image", source_provider=self.name)
+        except Exception as e:
+            logger.debug(f"[COMFYUI] fetch_visual error: {e}")
+
         return None
 
 
