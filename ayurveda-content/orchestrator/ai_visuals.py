@@ -30,16 +30,56 @@ COMFYUI_URL = os.getenv("COMFYUI_URL", "http://0.0.0.0:8188/").strip().rstrip("/
 def get_comfyui_base_urls(configured_url: Optional[str] = None) -> List[str]:
     """
     Returns candidate URLs for ComfyUI.
-    On Windows client sockets, connecting to 0.0.0.0 throws WinError 10049.
-    We include 127.0.0.1 as an automatic client fallback for 0.0.0.0.
+    ComfyUI defaults to 127.0.0.1:8188 or 0.0.0.0:8188 when started with --listen.
+    We test canonical loopback (127.0.0.1), localhost, and 0.0.0.0.
     """
     raw = (configured_url or os.getenv("COMFYUI_URL") or "http://0.0.0.0:8188/").strip().rstrip("/")
-    urls = [raw]
-    if "0.0.0.0" in raw:
-        urls.append(raw.replace("0.0.0.0", "127.0.0.1"))
-    elif "127.0.0.1" in raw:
-        urls.append(raw.replace("127.0.0.1", "0.0.0.0"))
-    return urls
+    candidates: List[str] = []
+
+    # If user provided a specific non-loopback IP/host, prioritize it
+    if raw not in ["http://0.0.0.0:8188", "http://127.0.0.1:8188", "http://localhost:8188"]:
+        candidates.append(raw)
+
+    # Standard loopback addresses (127.0.0.1 is standard on both Linux and Windows)
+    for u in ["http://127.0.0.1:8188", "http://localhost:8188", "http://0.0.0.0:8188"]:
+        if u not in candidates:
+            candidates.append(u)
+
+    if raw not in candidates:
+        candidates.append(raw)
+
+    return candidates
+
+
+def check_comfyui_connection(base_url: Optional[str] = None, timeout: float = 4.0) -> Tuple[bool, str, Optional[str]]:
+    """
+    Tests ComfyUI availability across candidate endpoints.
+    Returns (is_available, diagnostic_message, reachable_url).
+    """
+    urls = get_comfyui_base_urls(base_url)
+    diag_errors: List[str] = []
+
+    for u in urls:
+        # Check /system_stats and /prompt (GET to /prompt returns 405 Method Not Allowed if ComfyUI is up)
+        for path in ["/system_stats", "/prompt"]:
+            full_url = f"{u}{path}"
+            try:
+                resp = requests.get(full_url, timeout=timeout)
+                if resp.status_code in (200, 405):
+                    return True, f"Connected to ComfyUI at {u} (HTTP {resp.status_code})", u
+                diag_errors.append(f"{full_url} -> HTTP {resp.status_code}")
+            except (requests.exceptions.ConnectionError, OSError):
+                diag_errors.append(f"{u} (connection refused)")
+                break  # don't test further paths on the same host if connection refused
+            except requests.exceptions.Timeout:
+                diag_errors.append(f"{u} (timed out after {timeout}s)")
+                break
+            except Exception as e:
+                diag_errors.append(f"{full_url} ({type(e).__name__}: {e})")
+                break
+
+    summary = "; ".join(diag_errors) if diag_errors else "no response"
+    return False, f"ComfyUI offline or unreachable ({summary})", None
 
 
 def safe_comfyui_request(
@@ -67,17 +107,18 @@ def safe_comfyui_request(
 
 def is_comfyui_available(base_url: Optional[str] = None) -> bool:
     """Returns True if the ComfyUI REST API is responsive and ready for inference."""
-    try:
-        resp, reachable_url = safe_comfyui_request("GET", "/system_stats", base_url=base_url, timeout=2)
-        return resp.status_code == 200
-    except Exception:
-        return False
+    available, msg, reachable_url = check_comfyui_connection(base_url=base_url)
+    if available:
+        logger.info(f"[+] {msg}")
+    else:
+        logger.warning(f"[-] {msg}")
+    return available
 
 
 def get_available_checkpoint(base_url: Optional[str] = None) -> Optional[str]:
     """Discovers available checkpoint models installed in the ComfyUI server."""
     try:
-        resp, _ = safe_comfyui_request("GET", "/object_info/CheckpointLoaderSimple", base_url=base_url, timeout=3)
+        resp, _ = safe_comfyui_request("GET", "/object_info/CheckpointLoaderSimple", base_url=base_url, timeout=4)
         if resp.status_code == 200:
             data = resp.json()
             ckpt_list = (
@@ -98,36 +139,43 @@ def get_available_checkpoint(base_url: Optional[str] = None) -> Optional[str]:
 
 
 def construct_cinematic_ayurveda_prompt(subject: str, scene_type: str = "macro") -> str:
-    """Creates a hyper-realistic, documentary-grade visual prompt."""
-    if scene_type == "cold_extinguish":
+    """Creates a hyper-realistic, documentary-grade visual prompt adapted to the subject query."""
+    subj_lower = subject.lower()
+
+    # Anatomy, bacteria, gut fire, internal organs
+    if any(k in subj_lower for k in ["anatomy", "bacteria", "gut", "stomach", "digest", "intestine", "internal"]):
         return (
-            f"Cinematic 8k photorealistic documentary shot of a tall glass of ice water splashing and freezing "
-            "a glowing warm internal fire, dramatic rising steam, embers turning dark, high contrast, "
-            "weathered obsidian background, shallow depth of field, National Geographic documentary style, zero text."
+            f"Sleek minimalist medical anatomical illustration explaining {subject}. "
+            "Dark translucent human torso silhouette, glowing warm golden energy pathways of internal digestive metabolic fire, "
+            "high contrast, dark obsidian background, Apple health documentary aesthetic, clean 8k render, zero text."
         )
-    elif scene_type == "anatomy_fire":
+    # Cold liquids, ice water, extinguishing fire
+    elif any(k in subj_lower for k in ["ice", "cold", "water", "extinguish", "freeze"]):
         return (
-            f"Sleek minimalist medical anatomical illustration of the human digestive system explaining {subject}. "
-            "Dark translucent human torso silhouette, glowing warm golden energy pathways of internal digestive fire, "
-            "high contrast, dark obsidian background, Apple health aesthetic, clean 8k render, no text."
+            f"Cinematic 8k photorealistic documentary shot of {subject}. "
+            "A glass of ice water splashing and extinguishing glowing warm embers, dramatic rising steam, "
+            "high contrast, weathered dark obsidian background, National Geographic documentary style, zero text."
         )
-    elif scene_type == "toxic_waste":
+    # Stale leftovers, toxic waste, fermentation, bloating
+    elif any(k in subj_lower for k in ["stale", "leftover", "toxic", "waste", "bloat", "ferment", "sludge"]):
         return (
             f"Cinematic dark medical visualization of {subject}. "
-            "Congealed fat molecules and metabolic sludge within a stylized digestive tract, moody amber backlighting, "
+            "Congealed food particles and metabolic stagnation within stylized digestive system, moody amber backlighting, "
             "obsidian shadows, hyper-detailed texture, National Geographic documentary style, 8k photorealistic, zero text."
         )
-    elif scene_type == "remedy":
+    # Vitality, smiling, healthy person
+    elif any(k in subj_lower for k in ["person", "healthy", "glow", "smile", "vitality", "face"]):
+        return (
+            f"Cinematic portrait of vibrant healthy energized human representing {subject}. "
+            "Radiant skin and inner digestive vitality, warm golden Rembrandt rim lighting, soft dark slate stone background, "
+            "peaceful confident expression, 85mm portrait lens, National Geographic documentary style, zero text."
+        )
+    # Cooking, boiling, herbs, tea, remedies, spices, meals
+    elif any(k in subj_lower for k in ["cook", "pot", "tea", "meal", "herb", "spice", "ginger", "decoction", "remedy", "serve"]):
         return (
             f"Close-up of ancient authentic Ayurvedic preparation of {subject}. "
-            "Handcrafted antique bronze and copper vessels, raw organic botanical ingredients, "
+            "Handcrafted antique bronze and copper vessels, fresh raw organic botanical ingredients, "
             "dark moody monastery lighting, warm candlelight ambient glow, cinematic composition, photorealistic 8k, zero text."
-        )
-    elif scene_type == "vitality":
-        return (
-            f"Cinematic portrait of vibrant healthy energized human with radiant skin and digestive balance. "
-            "Warm golden Rembrandt rim lighting, soft dark slate stone background, peaceful confident expression, "
-            "85mm portrait lens, National Geographic documentary style, zero text."
         )
     else:
         return (
@@ -281,9 +329,11 @@ def generate_scene_visuals(
     topic_data: Dict[str, Any],
     output_dir: Path,
     queries: Optional[List[str]] = None,
+    max_frames: int = 6,
 ) -> List[str]:
     """
     Generates cinematic AI visual frames for the video scenes via ComfyUI.
+    Uses the script's visual queries to generate matching scene imagery.
     Returns list of saved image file paths.
     """
     if not is_comfyui_available():
@@ -292,24 +342,31 @@ def generate_scene_visuals(
     output_dir.mkdir(parents=True, exist_ok=True)
     visual_paths: List[str] = []
 
-    subject = topic_data.get("subject", "Digestive Fire and Gut Health")
-    key_fact = topic_data.get("key_fact", "Warm spiced ginger decoction stimulating enzymes")
+    # Use queries if available to match the narrative beats exactly
+    if queries and len(queries) > 0:
+        subjects_to_generate = queries[:max_frames]
+    else:
+        subject = topic_data.get("subject", "Digestive Fire and Gut Health")
+        key_fact = topic_data.get("key_fact", "Warm spiced botanical decoction stimulating digestion")
+        subjects_to_generate = [
+            f"Ice water freezing internal digestive heat ({subject})",
+            f"Translucent anatomical gut digestion ({subject})",
+            f"Congealed metabolic stagnation in intestines ({key_fact})",
+            f"Warm herbal preparation ({key_fact})",
+            f"Healthy energized vitality and digestion balance",
+        ]
 
-    scene_configs = [
-        {"type": "cold_extinguish", "subject": "Ice water freezing digestive stomach fire"},
-        {"type": "anatomy_fire", "subject": subject},
-        {"type": "toxic_waste", "subject": "Congealed undigested food and toxic metabolic sludge in intestines"},
-        {"type": "remedy", "subject": key_fact},
-        {"type": "vitality", "subject": "Healthy gut vitality and digestion"},
-    ]
+    logger.info(f"Generating {len(subjects_to_generate)} ComfyUI scene frames for topic: '{topic_data.get('subject', '')}'...")
 
-    for idx, cfg in enumerate(scene_configs, 1):
+    for idx, subj in enumerate(subjects_to_generate, 1):
         target_file = output_dir / f"scene_{idx}.jpg"
         if target_file.exists() and target_file.stat().st_size > 1000:
+            logger.info(f"Reusing cached ComfyUI visual: {target_file.name}")
             visual_paths.append(str(target_file))
             continue
 
-        prompt = construct_cinematic_ayurveda_prompt(cfg["subject"], cfg["type"])
+        prompt = construct_cinematic_ayurveda_prompt(subj)
+        logger.info(f"Rendering ComfyUI frame {idx}/{len(subjects_to_generate)}: '{subj[:50]}'...")
         result = generate_comfyui_image(prompt, target_file)
         if result and target_file.exists() and target_file.stat().st_size > 1000:
             visual_paths.append(str(target_file))

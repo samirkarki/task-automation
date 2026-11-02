@@ -220,22 +220,31 @@ def generate_video_assets(
         "healthy energetic smiling person",
     ]
 
-    # Check ComfyUI (defaults to http://0.0.0.0:8188/ unless overridden by COMFYUI_URL)
-    ai_frames: List[Path] = []
+    visual_clips: List[Path] = []
+
+    # Priority 1: Check ComfyUI (defaults to http://0.0.0.0:8188/ unless overridden by COMFYUI_URL)
+    logger.info("Checking ComfyUI availability for bespoke visual generation...")
     if is_comfyui_available():
-        logger.info(f"[*] ComfyUI server detected at {COMFYUI_URL}! Generating bespoke photorealistic frames...")
+        logger.info(f"[*] ComfyUI server active! Generating photorealistic AI visual frames for {len(stock_queries)} narrative beats...")
         ai_paths = generate_scene_visuals(
             topic_data=selected_topic,
             output_dir=work_dir / "ai_visuals",
             queries=stock_queries,
         )
-        ai_frames = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
+        visual_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
+        if visual_clips:
+            logger.info(f"[+] Successfully generated {len(visual_clips)} bespoke ComfyUI visual frames. Bypassing stock downloads.")
+        else:
+            logger.warning("ComfyUI generation returned 0 valid frames. Falling back to stock footage...")
+    else:
+        logger.info("ComfyUI server not reachable. Falling back to Pixabay/Pexels stock footage...")
 
-    stock_clips_dir = work_dir / "clips"
-    downloaded_clips = download_batch_stock_videos(queries=stock_queries, output_dir=stock_clips_dir)
+    # Priority 2: Fallback to stock video clips ONLY if ComfyUI is unavailable or produced no clips
+    if not visual_clips:
+        stock_clips_dir = work_dir / "clips"
+        logger.info(f"Fetching stock videos from Pixabay/Pexels for {len(stock_queries)} queries...")
+        visual_clips = download_batch_stock_videos(queries=stock_queries, output_dir=stock_clips_dir)
 
-    # Combine bespoke AI frames with stock video clips (AI frames prioritized)
-    visual_clips: List[Path] = ai_frames + downloaded_clips
     if not visual_clips:
         logger.warning("No visual clips available from ComfyUI or stock APIs; using procedural canvas fallback.")
 
