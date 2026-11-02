@@ -7,8 +7,13 @@ Handles resumable video uploads, metadata injection, and automated pinned commen
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from common.env_loader import load_project_env
 
@@ -17,7 +22,6 @@ load_project_env()
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 logger = logging.getLogger("common.publishing.youtube")
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SECRETS_DIR = PROJECT_ROOT / "secrets"
 
 
@@ -81,6 +85,7 @@ YOUTUBE_TOKEN_FILE = os.getenv("YOUTUBE_TOKEN_FILE", DEFAULT_TOKEN_FILE)
 DEFAULT_PRIVACY = os.getenv("YOUTUBE_PRIVACY_STATUS", "public")
 YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 
@@ -92,7 +97,7 @@ def get_authenticated_service():
         from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
     except ImportError:
-        logger.warning("Google API client not installed (google-api-python-client google-auth-oauthlib).")
+        logger.warning("Google API client not installed. Run: pip install google-api-python-client google-auth-oauthlib")
         return None
 
     token_path = resolve_youtube_token_path()
@@ -102,7 +107,8 @@ def get_authenticated_service():
     if token_path.exists() and token_path.stat().st_size > 10:
         logger.info(f"Loading existing YouTube token from: {token_path}")
         try:
-            creds = Credentials.from_authorized_user_file(str(token_path), YOUTUBE_SCOPES)
+            # Load credentials without rigid scope constraint to avoid rejection of prior tokens
+            creds = Credentials.from_authorized_user_file(str(token_path))
         except Exception as e:
             logger.warning(f"Existing token file invalid ({e}).")
 
@@ -116,7 +122,12 @@ def get_authenticated_service():
                     token_out.write(creds.to_json())
                 logger.info(f"[+] Successfully refreshed YouTube token at {token_path}")
             except Exception as e:
-                logger.error(f"Failed to refresh YouTube OAuth token: {e}")
+                logger.error(
+                    f"Failed to refresh YouTube OAuth token: {e}\n"
+                    "Note: In Google Cloud Console, if your OAuth consent screen is in 'Testing' mode, "
+                    "refresh tokens expire automatically after 7 days.\n"
+                    "Fix: Re-authenticate, and in Google Cloud Console -> 'OAuth consent screen', click 'Publish App'."
+                )
                 creds = None
         else:
             creds = None
@@ -233,3 +244,36 @@ def upload_short_to_youtube(
     except Exception as e:
         logger.error(f"Failed to upload video to YouTube: {e}")
         return None
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="YouTube Authentication & Verification Tool")
+    parser.add_argument("--test", action="store_true", help="Verify YouTube API connection and print channel info")
+    parser.add_argument("--reauth", action="store_true", help="Force new authentication flow")
+    args = parser.parse_args()
+
+    token_p = resolve_youtube_token_path()
+    if args.reauth and token_p.exists():
+        logger.info(f"Removing expired/existing token: {token_p}")
+        token_p.unlink()
+
+    service = get_authenticated_service()
+    if service:
+        try:
+            resp = service.channels().list(mine=True, part="snippet").execute()
+            items = resp.get("items", [])
+            if items:
+                ch_title = items[0]["snippet"]["title"]
+                ch_id = items[0]["id"]
+                print("\n" + "=" * 65)
+                print(f"✅ SUCCESS! Authenticated with YouTube Channel:")
+                print(f"   Title: {ch_title}")
+                print(f"   ID:    {ch_id}")
+                print("=" * 65 + "\n")
+            else:
+                print("✅ Successfully authenticated with YouTube API (no channel found on this account).")
+        except Exception as e:
+            print(f"❌ Authenticated credentials failed API query: {e}")
+    else:
+        print("❌ YouTube authentication failed.")
