@@ -59,18 +59,6 @@ def resolve_youtube_client_secrets_path() -> Path:
     if canonical.exists() and canonical.stat().st_size > 10:
         return canonical
 
-    # If legacy singular client_secret.json exists, auto-migrate to client_secrets.json
-    legacy_file = (SECRETS_DIR / "client_secret.json").resolve()
-    if legacy_file.exists() and legacy_file.stat().st_size > 10 and not canonical.exists():
-        try:
-            import shutil
-            shutil.copyfile(str(legacy_file), str(canonical))
-            logger.info(f"Migrated legacy '{legacy_file.name}' to standardized '{canonical.name}'")
-            return canonical
-        except Exception:
-            pass
-
-    # Check working directory secrets folder
     cwd_secrets = (Path.cwd() / "secrets" / "client_secrets.json").resolve()
     if cwd_secrets.exists() and cwd_secrets.stat().st_size > 10:
         return cwd_secrets
