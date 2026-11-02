@@ -42,7 +42,7 @@ from common.audio_mastering import master_voice_with_ambient
 
 from topic_catalog import pick_random_topic, generate_title_variants, CATEGORIES
 from analytics_feedback import AyurvedaAnalyticsDB, FeedbackOptimizer
-from ai_visuals import is_comfyui_available, generate_scene_visuals, COMFYUI_URL
+from ai_visuals import is_comfyui_available, generate_scene_visuals, diagnose_comfyui, COMFYUI_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ayurveda.pipeline")
@@ -517,10 +517,15 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Ayurveda Content Automation Pipeline")
     parser.add_argument("--category", type=str, default=None, help="Optional category key")
+    parser.add_argument("--diagnose-comfyui", action="store_true", help="Diagnose ComfyUI server models and AnimateDiff capabilities")
     parser.add_argument("--publish", action="store_true", help="Publish video to social platforms")
     parser.add_argument("--live", action="store_true", help="Perform real live publish (without this, publishing is dry-run)")
     parser.add_argument("--privacy", type=str, choices=["public", "unlisted", "private"], default="public", help="YouTube upload privacy status (default: public)")
     args = parser.parse_args()
+
+    if args.diagnose_comfyui:
+        diagnose_comfyui()
+        sys.exit(0)
 
     run_ayurveda_pipeline(
         category_key=args.category,

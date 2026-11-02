@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 import random
+import subprocess
 import sys
 import time
 from typing import Dict, Any, List, Optional, Tuple
@@ -143,7 +144,6 @@ def get_available_checkpoint(base_url: Optional[str] = None, prefer_sd15: bool =
                         c_lower = ckpt.lower()
                         if not any(k in c_lower for k in ["sdxl", "xl", "flux", "cascade"]):
                             return ckpt
-                # Prefer SDXL, Turbo, or photorealistic checkpoints if present
                 for ckpt in ckpt_list:
                     if any(k in ckpt.lower() for k in ["sdxl", "xl", "turbo", "lightning", "flux", "real", "phot"]):
                         return ckpt
@@ -154,38 +154,55 @@ def get_available_checkpoint(base_url: Optional[str] = None, prefer_sd15: bool =
 
 
 def get_available_motion_model(base_url: Optional[str] = None) -> Optional[str]:
-    """Discovers available AnimateDiff motion models installed in ComfyUI."""
-    try:
-        resp, _ = safe_comfyui_request("GET", "/object_info/ADE_LoadAnimateDiffModel", base_url=base_url, timeout=4)
-        if resp.status_code == 200:
-            data = resp.json().get("ADE_LoadAnimateDiffModel", {})
-            models = data.get("input", {}).get("required", {}).get("model_name", [[]])[0]
-            if models and isinstance(models, list) and len(models) > 0:
-                for m in models:
-                    if any(k in m.lower() for k in ["v3", "v2", "mm_sd_v15"]):
-                        return m
-                return models[0]
-    except Exception as e:
-        logger.debug(f"Failed to fetch motion model info from ComfyUI: {e}")
+    """Discovers available AnimateDiff motion models installed in ComfyUI across known loader nodes."""
+    candidate_nodes = [
+        "ADE_LoadAnimateDiffModel",
+        "ADE_AnimateDiffLoaderWithContext",
+        "AnimateDiffLoader",
+        "AnimateDiffLoaderV1",
+        "AnimateDiffModuleLoader",
+    ]
+    for node_name in candidate_nodes:
+        try:
+            resp, _ = safe_comfyui_request("GET", f"/object_info/{node_name}", base_url=base_url, timeout=4)
+            if resp.status_code == 200:
+                data = resp.json().get(node_name, {})
+                req = data.get("input", {}).get("required", {})
+                for p_name in ["model_name", "motion_model", "motion_module", "animatediff_model"]:
+                    if p_name in req:
+                        models = req[p_name][0]
+                        if models and isinstance(models, list) and len(models) > 0:
+                            for m in models:
+                                if any(k in str(m).lower() for k in ["v3", "v2", "mm_sd_v15"]):
+                                    return str(m)
+                            return str(models[0])
+        except Exception:
+            continue
     return None
 
 
 def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any]:
     """
-    Queries ComfyUI /object_info to detect installed custom nodes and video capabilities:
-    - AnimateDiff (ADE_ApplyAnimateDiffModel / ADE_LoadAnimateDiffModel)
-    - VideoHelperSuite (VHS_VideoCombine)
-    - SVD (SVD_img2vid_Conditioning)
+    Comprehensive discovery of ComfyUI capabilities:
+    - Automatically discovers ANY AnimateDiff implementation (AnimateDiff-Evolved, classic AnimateDiff, etc.)
+    - Identifies all installed motion models from any model directory
+    - Detects video export options (VHS_VideoCombine, AnimateDiffCombine, SaveAnimatedWEBP)
+    - Automatically falls back to core animated WebP/GIF when VHS is absent
     """
     caps: Dict[str, Any] = {
         "available": False,
         "animatediff": False,
+        "animatediff_nodes": [],
+        "animatediff_loader_node": None,
         "vhs": False,
+        "video_export_node": None,
         "svd": False,
         "can_generate_video": False,
         "motion_model": None,
+        "available_motion_models": [],
         "checkpoint": None,
         "sd15_checkpoint": None,
+        "available_checkpoints": [],
         "missing_for_video": [],
     }
 
@@ -194,55 +211,162 @@ def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any
 
     caps["available"] = True
 
-    # 1. Check VideoHelperSuite (VHS_VideoCombine)
+    # 1. Fetch full node catalog if available
+    all_nodes: Dict[str, Any] = {}
     try:
-        resp, _ = safe_comfyui_request("GET", "/object_info/VHS_VideoCombine", base_url=base_url, timeout=4)
-        if resp.status_code == 200 and "VHS_VideoCombine" in resp.json():
-            caps["vhs"] = True
-    except Exception:
-        pass
+        resp, reachable_endpoint = safe_comfyui_request("GET", "/object_info", base_url=base_url, timeout=6)
+        if resp.status_code == 200 and isinstance(resp.json(), dict):
+            all_nodes = resp.json()
+    except Exception as e:
+        logger.debug(f"Full /object_info fetch not available ({e}). Probing individual node endpoints...")
 
-    # 2. Check AnimateDiff-Evolved nodes
-    try:
-        resp, _ = safe_comfyui_request("GET", "/object_info/ADE_LoadAnimateDiffModel", base_url=base_url, timeout=4)
-        if resp.status_code == 200 and "ADE_LoadAnimateDiffModel" in resp.json():
-            caps["animatediff"] = True
-            caps["motion_model"] = get_available_motion_model(base_url)
-    except Exception:
-        pass
+    # 2. Checkpoints
+    ckpt_list: List[str] = []
+    if "CheckpointLoaderSimple" in all_nodes:
+        ckpt_list = (
+            all_nodes["CheckpointLoaderSimple"]
+            .get("input", {})
+            .get("required", {})
+            .get("ckpt_name", [[]])[0]
+        )
+    if not ckpt_list:
+        try:
+            resp, _ = safe_comfyui_request("GET", "/object_info/CheckpointLoaderSimple", base_url=base_url, timeout=4)
+            if resp.status_code == 200:
+                ckpt_list = resp.json().get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[]])[0]
+        except Exception:
+            pass
 
-    if not caps["animatediff"]:
-        for alt_node in ["ADE_ApplyAnimateDiffModel", "AnimateDiffLoaderV1"]:
+    if isinstance(ckpt_list, list) and ckpt_list:
+        caps["available_checkpoints"] = ckpt_list
+        for ckpt in ckpt_list:
+            c_lower = str(ckpt).lower()
+            if not any(k in c_lower for k in ["sdxl", "xl", "flux", "cascade"]):
+                caps["sd15_checkpoint"] = ckpt
+                break
+        for ckpt in ckpt_list:
+            if any(k in str(ckpt).lower() for k in ["sdxl", "xl", "turbo", "lightning", "flux", "real", "phot"]):
+                caps["checkpoint"] = ckpt
+                break
+        if not caps["checkpoint"]:
+            caps["checkpoint"] = ckpt_list[0]
+        if not caps["sd15_checkpoint"]:
+            caps["sd15_checkpoint"] = ckpt_list[0]
+
+    # 3. AnimateDiff Node Discovery
+    known_ad_nodes = [
+        "ADE_LoadAnimateDiffModel",
+        "ADE_AnimateDiffLoaderWithContext",
+        "AnimateDiffLoader",
+        "AnimateDiffLoaderV1",
+        "AnimateDiffModuleLoader",
+        "ADE_ApplyAnimateDiffModel",
+        "AnimateDiffCombine",
+    ]
+
+    detected_ad_nodes: List[str] = []
+    if all_nodes:
+        detected_ad_nodes = [
+            k for k in all_nodes
+            if "animatediff" in k.lower() or k.startswith("ADE_")
+        ]
+    else:
+        for node_name in known_ad_nodes:
             try:
-                resp, _ = safe_comfyui_request("GET", f"/object_info/{alt_node}", base_url=base_url, timeout=4)
-                if resp.status_code == 200 and alt_node in resp.json():
-                    caps["animatediff"] = True
-                    break
+                resp, _ = safe_comfyui_request("GET", f"/object_info/{node_name}", base_url=base_url, timeout=3)
+                if resp.status_code == 200 and node_name in resp.json():
+                    detected_ad_nodes.append(node_name)
+                    all_nodes[node_name] = resp.json()[node_name]
             except Exception:
                 pass
 
-    # 3. Check SVD
-    try:
-        resp, _ = safe_comfyui_request("GET", "/object_info/SVD_img2vid_Conditioning", base_url=base_url, timeout=4)
-        if resp.status_code == 200 and "SVD_img2vid_Conditioning" in resp.json():
-            caps["svd"] = True
-    except Exception:
-        pass
+    caps["animatediff_nodes"] = detected_ad_nodes
+    if detected_ad_nodes:
+        caps["animatediff"] = True
 
-    caps["checkpoint"] = get_available_checkpoint(base_url)
-    caps["sd15_checkpoint"] = get_available_checkpoint(base_url, prefer_sd15=True)
+    # Identify primary loader node
+    for candidate in [
+        "ADE_LoadAnimateDiffModel",
+        "ADE_AnimateDiffLoaderWithContext",
+        "AnimateDiffLoader",
+        "AnimateDiffLoaderV1",
+        "AnimateDiffModuleLoader",
+    ]:
+        if candidate in detected_ad_nodes:
+            caps["animatediff_loader_node"] = candidate
+            break
 
+    # 4. Discover Motion Models across any registered AnimateDiff node
+    found_motion_models: List[str] = []
+    for node_name in (detected_ad_nodes or known_ad_nodes):
+        node_info = all_nodes.get(node_name)
+        if not node_info:
+            try:
+                resp, _ = safe_comfyui_request("GET", f"/object_info/{node_name}", base_url=base_url, timeout=3)
+                if resp.status_code == 200 and node_name in resp.json():
+                    node_info = resp.json()[node_name]
+            except Exception:
+                pass
+        if node_info:
+            req = node_info.get("input", {}).get("required", {})
+            for p_name in ["model_name", "motion_model", "motion_module", "animatediff_model"]:
+                if p_name in req:
+                    model_choices = req[p_name][0]
+                    if isinstance(model_choices, list):
+                        for m in model_choices:
+                            m_str = str(m).strip()
+                            if m_str and m_str not in found_motion_models:
+                                found_motion_models.append(m_str)
+
+    caps["available_motion_models"] = found_motion_models
+    if found_motion_models:
+        for m in found_motion_models:
+            if any(k in m.lower() for k in ["v3", "v2", "mm_sd_v15"]):
+                caps["motion_model"] = m
+                break
+        if not caps["motion_model"]:
+            caps["motion_model"] = found_motion_models[0]
+
+    # 5. Video Export Nodes (VHS_VideoCombine, AnimateDiffCombine, SaveAnimatedWEBP)
+    for v_node in ["VHS_VideoCombine", "AnimateDiffCombine", "SaveAnimatedWEBP", "SaveAnimatedPNG"]:
+        if v_node in all_nodes:
+            if v_node == "VHS_VideoCombine":
+                caps["vhs"] = True
+            if not caps["video_export_node"]:
+                caps["video_export_node"] = v_node
+        else:
+            try:
+                resp, _ = safe_comfyui_request("GET", f"/object_info/{v_node}", base_url=base_url, timeout=3)
+                if resp.status_code == 200 and v_node in resp.json():
+                    if v_node == "VHS_VideoCombine":
+                        caps["vhs"] = True
+                    if not caps["video_export_node"]:
+                        caps["video_export_node"] = v_node
+            except Exception:
+                pass
+
+    if not caps["video_export_node"]:
+        caps["video_export_node"] = "SaveImage"
+
+    # 6. Assess Readiness & Formulate Diagnostics
     missing: List[str] = []
-    if not caps["vhs"]:
-        missing.append("VideoHelperSuite (node 'VHS_VideoCombine')")
     if not caps["animatediff"]:
-        missing.append("AnimateDiff (node 'ADE_LoadAnimateDiffModel' or 'ADE_ApplyAnimateDiffModel')")
-    if not caps["motion_model"]:
-        missing.append("AnimateDiff motion model checkpoint in ComfyUI/models/animatediff_models/ (e.g. v3_sd15_mm.ckpt)")
+        missing.append("No AnimateDiff custom nodes detected in ComfyUI registry")
+    elif not caps["motion_model"]:
+        misplaced = [c for c in caps.get("available_checkpoints", []) if any(k in str(c).lower() for k in ["v3", "v2", "mm_sd", "animatediff"])]
+        if misplaced:
+            missing.append(
+                f"Motion model '{misplaced[0]}' was found in models/checkpoints/, but AnimateDiff expects it in ComfyUI/models/animatediff_models/ (or custom_nodes/ComfyUI-AnimateDiff/models/). Copy or symlink it there."
+            )
+        else:
+            missing.append(
+                f"AnimateDiff node '{caps.get('animatediff_loader_node') or 'AnimateDiff'}' is installed, but no motion model (.ckpt/.safetensors) was found in ComfyUI/models/animatediff_models/."
+            )
 
     caps["missing_for_video"] = missing
 
-    if caps["vhs"] and caps["animatediff"] and caps["motion_model"]:
+    # Capable of generating video as long as AnimateDiff is present and a motion model is loaded!
+    if caps["animatediff"] and caps["motion_model"]:
         caps["can_generate_video"] = True
 
     return caps
@@ -526,6 +650,25 @@ def generate_comfyui_image(
         return None
 
 
+def convert_animation_to_mp4(src_path: Path, dst_mp4: Path) -> bool:
+    """Converts an animated WebP, GIF, or image sequence to H.264 MP4 using system ffmpeg."""
+    try:
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(src_path),
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            str(dst_mp4),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        return res.returncode == 0 and dst_mp4.exists() and dst_mp4.stat().st_size > 1000
+    except Exception as e:
+        logger.debug(f"ffmpeg conversion error: {e}")
+        return False
+
+
 def generate_comfyui_video(
     prompt_text: str,
     output_path: Path,
@@ -536,16 +679,18 @@ def generate_comfyui_video(
     timeout_sec: int = 600,
 ) -> Optional[Path]:
     """
-    Generates a 9:16 short video clip via ComfyUI AnimateDiff + VHS_VideoCombine.
-    Falls back gracefully if AnimateDiff or motion models are unavailable.
-    Returns output_path if successful, None otherwise.
+    Generates a 9:16 short video clip via ComfyUI AnimateDiff.
+    Automatically adapts to whichever AnimateDiff loader node is installed
+    (ADE_LoadAnimateDiffModel, ADE_AnimateDiffLoaderWithContext, AnimateDiffLoader, etc.)
+    and whichever video/animation export node is available (VHS_VideoCombine, AnimateDiffCombine, SaveAnimatedWEBP).
     """
     if not is_comfyui_available(base_url):
         return None
 
     caps = detect_comfyui_capabilities(base_url)
     if not caps.get("can_generate_video"):
-        logger.debug("ComfyUI server lacks AnimateDiff or VHS nodes. Video generation skipped.")
+        missing_str = "; ".join(caps.get("missing_for_video", []))
+        logger.debug(f"ComfyUI video generation skipped ({missing_str}).")
         return None
 
     ckpt_name = caps.get("sd15_checkpoint") or caps.get("checkpoint")
@@ -554,6 +699,9 @@ def generate_comfyui_video(
     if not ckpt_name or not motion_model:
         logger.warning(f"Missing required models for video: ckpt={ckpt_name}, motion_model={motion_model}")
         return None
+
+    loader_node = caps.get("animatediff_loader_node") or "ADE_LoadAnimateDiffModel"
+    export_node = caps.get("video_export_node") or "VHS_VideoCombine"
 
     seed = random.randint(1, 1_000_000_000)
     client_id = str(uuid.uuid4())
@@ -566,21 +714,10 @@ def generate_comfyui_video(
     width, height = 512, 768
     steps, cfg = 20, 7.0
 
-    prompt_graph = {
+    prompt_graph: Dict[str, Any] = {
         "1": {
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": ckpt_name},
-        },
-        "2": {
-            "class_type": "ADE_LoadAnimateDiffModel",
-            "inputs": {"model_name": motion_model},
-        },
-        "3": {
-            "class_type": "ADE_ApplyAnimateDiffModel",
-            "inputs": {
-                "model": ["1", 0],
-                "motion_model": ["2", 0],
-            },
         },
         "4": {
             "class_type": "EmptyLatentImage",
@@ -594,26 +731,69 @@ def generate_comfyui_video(
             "class_type": "CLIPTextEncode",
             "inputs": {"text": neg_text, "clip": ["1", 1]},
         },
-        "7": {
-            "class_type": "KSampler",
+    }
+
+    # Inject AnimateDiff based on detected loader node variant
+    model_ref = ["1", 0]
+    if loader_node == "ADE_LoadAnimateDiffModel":
+        prompt_graph["2"] = {
+            "class_type": "ADE_LoadAnimateDiffModel",
+            "inputs": {"model_name": motion_model},
+        }
+        prompt_graph["3"] = {
+            "class_type": "ADE_ApplyAnimateDiffModel",
             "inputs": {
-                "seed": seed,
-                "steps": steps,
-                "cfg": cfg,
-                "sampler_name": "euler_ancestral",
-                "scheduler": "normal",
-                "denoise": 1.0,
-                "model": ["3", 0],
-                "positive": ["5", 0],
-                "negative": ["6", 0],
-                "latent_image": ["4", 0],
+                "model": ["1", 0],
+                "motion_model": ["2", 0],
             },
+        }
+        model_ref = ["3", 0]
+    elif loader_node == "ADE_AnimateDiffLoaderWithContext":
+        prompt_graph["3"] = {
+            "class_type": "ADE_AnimateDiffLoaderWithContext",
+            "inputs": {
+                "model": ["1", 0],
+                "model_name": motion_model,
+                "beta_schedule": "sqrt_linear (default)",
+            },
+        }
+        model_ref = ["3", 0]
+    else:
+        # Classic AnimateDiffLoader / AnimateDiffLoaderV1
+        prompt_graph["3"] = {
+            "class_type": loader_node,
+            "inputs": {
+                "model": ["1", 0],
+                "model_name": motion_model,
+                "latents": ["4", 0],
+            },
+        }
+        model_ref = ["3", 0]
+
+    # KSampler and VAEDecode
+    prompt_graph["7"] = {
+        "class_type": "KSampler",
+        "inputs": {
+            "seed": seed,
+            "steps": steps,
+            "cfg": cfg,
+            "sampler_name": "euler_ancestral",
+            "scheduler": "normal",
+            "denoise": 1.0,
+            "model": model_ref,
+            "positive": ["5", 0],
+            "negative": ["6", 0],
+            "latent_image": ["4", 0],
         },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["7", 0], "vae": ["1", 2]},
-        },
-        "9": {
+    }
+    prompt_graph["8"] = {
+        "class_type": "VAEDecode",
+        "inputs": {"samples": ["7", 0], "vae": ["1", 2]},
+    }
+
+    # Video combine / animation export node
+    if export_node == "VHS_VideoCombine":
+        prompt_graph["9"] = {
             "class_type": "VHS_VideoCombine",
             "inputs": {
                 "images": ["8", 0],
@@ -624,11 +804,39 @@ def generate_comfyui_video(
                 "pingpong": False,
                 "save_output": True,
             },
-        },
-    }
+        }
+    elif export_node == "AnimateDiffCombine":
+        prompt_graph["9"] = {
+            "class_type": "AnimateDiffCombine",
+            "inputs": {
+                "images": ["8", 0],
+                "frame_rate": frame_rate,
+                "loop_count": 0,
+                "save_image": True,
+                "filename_prefix": "ayurveda_anim",
+                "format": "image/gif",
+            },
+        }
+    elif export_node == "SaveAnimatedWEBP":
+        prompt_graph["9"] = {
+            "class_type": "SaveAnimatedWEBP",
+            "inputs": {
+                "images": ["8", 0],
+                "filename_prefix": "ayurveda_anim",
+                "fps": float(frame_rate),
+                "lossless": False,
+                "quality": 85,
+                "method": "default",
+            },
+        }
+    else:
+        prompt_graph["9"] = {
+            "class_type": "SaveImage",
+            "inputs": {"filename_prefix": "ayurveda_anim", "images": ["8", 0]},
+        }
 
     try:
-        logger.info(f"Submitting AnimateDiff video prompt to ComfyUI ({ckpt_name} + {motion_model}, {num_frames} frames): {prompt_text[:60]}...")
+        logger.info(f"Submitting AnimateDiff video prompt to ComfyUI ({loader_node} + {motion_model}, {export_node}): {prompt_text[:60]}...")
         resp, reachable_url = safe_comfyui_request(
             "POST",
             "/prompt",
@@ -670,10 +878,26 @@ def generate_comfyui_video(
                                 )
                                 if v_resp.status_code == 200 and len(v_resp.content) > 1000:
                                     output_path.parent.mkdir(parents=True, exist_ok=True)
-                                    with open(output_path, "wb") as f:
-                                        f.write(v_resp.content)
-                                    logger.info(f"[+] Successfully generated ComfyUI video saved to {output_path}")
-                                    return output_path
+                                    file_ext = Path(filename).suffix.lower()
+                                    if file_ext in [".mp4", ".mov", ".m4v"]:
+                                        with open(output_path, "wb") as f:
+                                            f.write(v_resp.content)
+                                        logger.info(f"[+] Successfully generated ComfyUI video saved to {output_path}")
+                                        return output_path
+                                    elif file_ext in [".webp", ".gif"]:
+                                        temp_anim = output_path.with_suffix(file_ext)
+                                        with open(temp_anim, "wb") as f:
+                                            f.write(v_resp.content)
+                                        if convert_animation_to_mp4(temp_anim, output_path):
+                                            try:
+                                                temp_anim.unlink()
+                                            except Exception:
+                                                pass
+                                            logger.info(f"[+] Converted ComfyUI animated {file_ext} to MP4: {output_path}")
+                                            return output_path
+                                        else:
+                                            logger.info(f"[+] Saved ComfyUI animated visual to {temp_anim}")
+                                            return temp_anim
             except Exception as poll_err:
                 logger.debug(f"Polling ComfyUI video: {poll_err}")
 
@@ -773,3 +997,70 @@ def generate_scene_visuals(
             visual_paths.append(str(generated_file))
 
     return visual_paths
+
+
+def diagnose_comfyui(base_url: Optional[str] = None):
+    """Prints a comprehensive diagnostic report of ComfyUI capabilities and registered nodes."""
+    print("\n" + "=" * 68)
+    print("      ComfyUI AnimateDiff & Video Capabilities Diagnostic Report")
+    print("=" * 68)
+
+    avail, msg, reachable = check_comfyui_connection(base_url)
+    print(f"Server Connection: {'[+] ONLINE' if avail else '[-] OFFLINE'}")
+    print(f"Active Endpoint:   {reachable or 'None'}")
+    print(f"Status Details:    {msg}\n")
+
+    if not avail:
+        print("[!] ComfyUI server is unreachable. Please verify ComfyUI is running:")
+        print("    python main.py --listen 0.0.0.0 --port 8188")
+        print("=" * 68 + "\n")
+        return
+
+    caps = detect_comfyui_capabilities(reachable)
+
+    print("1. CHECKPOINTS DETECTED (models/checkpoints/):")
+    for ckpt in caps.get("available_checkpoints", []):
+        tag = "  --> [ACTIVE SD1.5]" if ckpt == caps.get("sd15_checkpoint") else ""
+        print(f"   * {ckpt}{tag}")
+    if not caps.get("available_checkpoints"):
+        print("   [-] None detected in models/checkpoints/")
+
+    print("\n2. ANIMATEDIFF NODES REGISTERED IN COMFYUI:")
+    for node in caps.get("animatediff_nodes", []):
+        tag = "  --> [PRIMARY LOADER]" if node == caps.get("animatediff_loader_node") else ""
+        print(f"   * {node}{tag}")
+    if not caps.get("animatediff_nodes"):
+        print("   [-] No AnimateDiff custom nodes detected in ComfyUI registry.")
+
+    print("\n3. MOTION MODELS DETECTED:")
+    for mm in caps.get("available_motion_models", []):
+        tag = "  --> [SELECTED ACTIVE]" if mm == caps.get("motion_model") else ""
+        print(f"   * {mm}{tag}")
+    if not caps.get("available_motion_models"):
+        print("   [-] No motion models found in AnimateDiff model directories.")
+
+    export_node = caps.get("video_export_node")
+    print(f"\n4. VIDEO / ANIMATION EXPORT NODE: {export_node}")
+    if export_node == "VHS_VideoCombine":
+        print("   [+] Native MP4 export enabled via VideoHelperSuite.")
+    elif export_node in ["SaveAnimatedWEBP", "AnimateDiffCombine"]:
+        print(f"   [+] Animation export enabled via {export_node} (auto-converts to MP4 with ffmpeg).")
+    else:
+        print("   [*] Frame export fallback active.")
+
+    print(f"\n5. VIDEO GENERATION READINESS: {'[+] READY (Can generate AnimateDiff video clips)' if caps.get('can_generate_video') else '[-] NOT READY (Still image mode only)'}")
+
+    if caps.get("missing_for_video"):
+        print("\nDIAGNOSTIC ADVISORY:")
+        for m in caps["missing_for_video"]:
+            print(f"   [!] {m}")
+
+    print("=" * 68 + "\n")
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="ComfyUI Diagnostic & Visuals Generator")
+    parser.add_argument("--diagnose", action="store_true", default=True, help="Diagnose ComfyUI capabilities")
+    args = parser.parse_args()
+    diagnose_comfyui()
