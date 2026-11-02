@@ -26,42 +26,72 @@ SECRETS_DIR = PROJECT_ROOT / "secrets"
 
 
 def resolve_youtube_token_path() -> Path:
-    """Discovers youtube_token.json across candidate paths."""
+    """Discovers youtube_token.json anchored to PROJECT_ROOT."""
     env_token = os.getenv("YOUTUBE_TOKEN_FILE")
     if env_token:
-        return Path(env_token).resolve()
-
-    candidates = [
-        SECRETS_DIR / "youtube_token.json",
-        SECRETS_DIR / "token.json",
-        Path.cwd() / "secrets" / "youtube_token.json",
-        Path.cwd() / "secrets" / "token.json",
-        Path.cwd() / "youtube_token.json",
-        Path.cwd() / "token.json",
-        PROJECT_ROOT / "youtube_token.json",
-    ]
-    for p in candidates:
+        p = Path(env_token)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
         if p.exists() and p.stat().st_size > 10:
             return p.resolve()
 
-    return (SECRETS_DIR / "youtube_token.json").resolve()
+    canonical = (SECRETS_DIR / "youtube_token.json").resolve()
+    if canonical.exists() and canonical.stat().st_size > 10:
+        return canonical
+
+    # Search candidates across subdirectories and unify to canonical
+    candidates = [
+        PROJECT_ROOT / "youtube_token.json",
+        Path.cwd() / "secrets" / "youtube_token.json",
+        Path.cwd() / "youtube_token.json",
+        PROJECT_ROOT / "ayurveda-content" / "orchestrator" / "secrets" / "youtube_token.json",
+        PROJECT_ROOT / "clipping" / "secrets" / "youtube_token.json",
+    ]
+    for p in candidates:
+        if p.exists() and p.stat().st_size > 10:
+            try:
+                SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+                import shutil
+                shutil.copyfile(str(p), str(canonical))
+                logger.info(f"Unified existing YouTube token from {p} -> {canonical}")
+            except Exception:
+                pass
+            return canonical
+
+    return canonical
 
 
 def resolve_youtube_client_secrets_path() -> Path:
-    """Returns the standardized path for client_secrets.json."""
+    """Returns the standardized path for client_secrets.json anchored to PROJECT_ROOT."""
     env_secret = os.getenv("YOUTUBE_CLIENT_SECRETS_FILE")
     if env_secret:
-        p = Path(env_secret).resolve()
+        p = Path(env_secret)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
         if p.exists() and p.stat().st_size > 10:
-            return p
+            return p.resolve()
 
     canonical = (SECRETS_DIR / "client_secrets.json").resolve()
     if canonical.exists() and canonical.stat().st_size > 10:
         return canonical
 
-    cwd_secrets = (Path.cwd() / "secrets" / "client_secrets.json").resolve()
-    if cwd_secrets.exists() and cwd_secrets.stat().st_size > 10:
-        return cwd_secrets
+    candidates = [
+        Path.cwd() / "secrets" / "client_secrets.json",
+        Path.cwd() / "client_secrets.json",
+        PROJECT_ROOT / "client_secrets.json",
+        PROJECT_ROOT / "ayurveda-content" / "orchestrator" / "secrets" / "client_secrets.json",
+        PROJECT_ROOT / "clipping" / "secrets" / "client_secrets.json",
+    ]
+    for p in candidates:
+        if p.exists() and p.stat().st_size > 10:
+            try:
+                SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+                import shutil
+                shutil.copyfile(str(p), str(canonical))
+                logger.info(f"Unified existing client_secrets from {p} -> {canonical}")
+            except Exception:
+                pass
+            return canonical
 
     return canonical
 
