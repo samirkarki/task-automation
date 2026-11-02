@@ -186,6 +186,7 @@ def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any
         "motion_model": None,
         "checkpoint": None,
         "sd15_checkpoint": None,
+        "missing_for_video": [],
     }
 
     if not is_comfyui_available(base_url):
@@ -230,6 +231,16 @@ def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any
 
     caps["checkpoint"] = get_available_checkpoint(base_url)
     caps["sd15_checkpoint"] = get_available_checkpoint(base_url, prefer_sd15=True)
+
+    missing: List[str] = []
+    if not caps["vhs"]:
+        missing.append("VideoHelperSuite (node 'VHS_VideoCombine')")
+    if not caps["animatediff"]:
+        missing.append("AnimateDiff (node 'ADE_LoadAnimateDiffModel' or 'ADE_ApplyAnimateDiffModel')")
+    if not caps["motion_model"]:
+        missing.append("AnimateDiff motion model checkpoint in ComfyUI/models/animatediff_models/ (e.g. v3_sd15_mm.ckpt)")
+
+    caps["missing_for_video"] = missing
 
     if caps["vhs"] and caps["animatediff"] and caps["motion_model"]:
         caps["can_generate_video"] = True
@@ -610,8 +621,8 @@ def generate_comfyui_video(
                 "loop_count": 0,
                 "filename_prefix": "ayurveda_anim",
                 "format": "video/h264-mp4",
-                "pingpong": false,
-                "save_output": true,
+                "pingpong": False,
+                "save_output": True,
             },
         },
     }
@@ -728,7 +739,8 @@ def generate_scene_visuals(
     if can_video:
         logger.info(f"[+] ComfyUI AnimateDiff video generation available! Motion model: {caps.get('motion_model')}")
     else:
-        logger.info("[*] ComfyUI text-to-image mode active (generating high-res portrait stills).")
+        missing_reasons = "; ".join(caps.get("missing_for_video", [])) or "No video nodes detected"
+        logger.info(f"[*] ComfyUI text-to-image mode active (generating high-res portrait stills). [Video disabled: {missing_reasons}]")
 
     # 3. Generate scenes
     for idx, prompt in enumerate(scene_prompts, 1):

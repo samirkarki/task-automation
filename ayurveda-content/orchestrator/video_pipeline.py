@@ -232,9 +232,34 @@ def generate_video_assets(
             queries=stock_queries,
             script_json=script_json,
         )
-        visual_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
-        if visual_clips:
-            logger.info(f"[+] Successfully generated {len(visual_clips)} bespoke ComfyUI visuals. Bypassing stock downloads.")
+        ai_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
+        ai_has_video = any(p.suffix.lower() in [".mp4", ".webm", ".mov"] for p in ai_clips)
+
+        if ai_has_video:
+            visual_clips = ai_clips
+            logger.info(f"[+] Successfully generated {len(visual_clips)} bespoke ComfyUI AI video clips. Bypassing stock downloads.")
+        elif ai_clips:
+            # ComfyUI generated only still images (.jpg). Fetch stock video clips to interleave with AI stills so the final video has real video motion!
+            stock_clips_dir = work_dir / "clips"
+            logger.info(
+                f"[*] ComfyUI generated {len(ai_clips)} bespoke static images (no video clips). "
+                "Fetching dynamic stock video clips from Pixabay/Pexels to interleave motion footage with AI stills..."
+            )
+            stock_clips = download_batch_stock_videos(queries=stock_queries, output_dir=stock_clips_dir)
+            if stock_clips:
+                # Interleave AI stills and dynamic stock videos: [ai_0, stock_0, ai_1, stock_1, ...]
+                interleaved: List[Path] = []
+                max_len = max(len(ai_clips), len(stock_clips))
+                for i in range(max_len):
+                    if i < len(ai_clips):
+                        interleaved.append(ai_clips[i])
+                    if i < len(stock_clips):
+                        interleaved.append(stock_clips[i])
+                visual_clips = interleaved
+                logger.info(f"[+] Successfully interleaved {len(ai_clips)} AI stills with {len(stock_clips)} dynamic stock video clips.")
+            else:
+                logger.warning("No stock videos downloaded; using ComfyUI stills.")
+                visual_clips = ai_clips
         else:
             logger.warning("ComfyUI generation returned 0 valid frames. Falling back to stock footage...")
     else:
