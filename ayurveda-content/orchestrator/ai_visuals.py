@@ -12,10 +12,16 @@ import logging
 import os
 from pathlib import Path
 import random
+import sys
 import time
 from typing import Dict, Any, List, Optional, Tuple
 import uuid
 import requests
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from common.env_loader import load_project_env
 
@@ -115,8 +121,12 @@ def is_comfyui_available(base_url: Optional[str] = None) -> bool:
     return available
 
 
-def get_available_checkpoint(base_url: Optional[str] = None) -> Optional[str]:
-    """Discovers available checkpoint models installed in the ComfyUI server."""
+def get_available_checkpoint(base_url: Optional[str] = None, prefer_sd15: bool = False) -> Optional[str]:
+    """
+    Discovers available checkpoint models installed in the ComfyUI server.
+    If prefer_sd15 is True (e.g., for AnimateDiff), prioritizes SD 1.5 checkpoints.
+    Otherwise prioritizes SDXL / photorealistic checkpoints.
+    """
     try:
         resp, _ = safe_comfyui_request("GET", "/object_info/CheckpointLoaderSimple", base_url=base_url, timeout=4)
         if resp.status_code == 200:
@@ -128,6 +138,11 @@ def get_available_checkpoint(base_url: Optional[str] = None) -> Optional[str]:
                 .get("ckpt_name", [[]])[0]
             )
             if ckpt_list and isinstance(ckpt_list, list) and len(ckpt_list) > 0:
+                if prefer_sd15:
+                    for ckpt in ckpt_list:
+                        c_lower = ckpt.lower()
+                        if not any(k in c_lower for k in ["sdxl", "xl", "flux", "cascade"]):
+                            return ckpt
                 # Prefer SDXL, Turbo, or photorealistic checkpoints if present
                 for ckpt in ckpt_list:
                     if any(k in ckpt.lower() for k in ["sdxl", "xl", "turbo", "lightning", "flux", "real", "phot"]):
@@ -138,9 +153,184 @@ def get_available_checkpoint(base_url: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def get_available_motion_model(base_url: Optional[str] = None) -> Optional[str]:
+    """Discovers available AnimateDiff motion models installed in ComfyUI."""
+    try:
+        resp, _ = safe_comfyui_request("GET", "/object_info/ADE_LoadAnimateDiffModel", base_url=base_url, timeout=4)
+        if resp.status_code == 200:
+            data = resp.json().get("ADE_LoadAnimateDiffModel", {})
+            models = data.get("input", {}).get("required", {}).get("model_name", [[]])[0]
+            if models and isinstance(models, list) and len(models) > 0:
+                for m in models:
+                    if any(k in m.lower() for k in ["v3", "v2", "mm_sd_v15"]):
+                        return m
+                return models[0]
+    except Exception as e:
+        logger.debug(f"Failed to fetch motion model info from ComfyUI: {e}")
+    return None
+
+
+def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Queries ComfyUI /object_info to detect installed custom nodes and video capabilities:
+    - AnimateDiff (ADE_ApplyAnimateDiffModel / ADE_LoadAnimateDiffModel)
+    - VideoHelperSuite (VHS_VideoCombine)
+    - SVD (SVD_img2vid_Conditioning)
+    """
+    caps: Dict[str, Any] = {
+        "available": False,
+        "animatediff": False,
+        "vhs": False,
+        "svd": False,
+        "can_generate_video": False,
+        "motion_model": None,
+        "checkpoint": None,
+        "sd15_checkpoint": None,
+    }
+
+    if not is_comfyui_available(base_url):
+        return caps
+
+    caps["available"] = True
+
+    # 1. Check VideoHelperSuite (VHS_VideoCombine)
+    try:
+        resp, _ = safe_comfyui_request("GET", "/object_info/VHS_VideoCombine", base_url=base_url, timeout=4)
+        if resp.status_code == 200 and "VHS_VideoCombine" in resp.json():
+            caps["vhs"] = True
+    except Exception:
+        pass
+
+    # 2. Check AnimateDiff-Evolved nodes
+    try:
+        resp, _ = safe_comfyui_request("GET", "/object_info/ADE_LoadAnimateDiffModel", base_url=base_url, timeout=4)
+        if resp.status_code == 200 and "ADE_LoadAnimateDiffModel" in resp.json():
+            caps["animatediff"] = True
+            caps["motion_model"] = get_available_motion_model(base_url)
+    except Exception:
+        pass
+
+    if not caps["animatediff"]:
+        for alt_node in ["ADE_ApplyAnimateDiffModel", "AnimateDiffLoaderV1"]:
+            try:
+                resp, _ = safe_comfyui_request("GET", f"/object_info/{alt_node}", base_url=base_url, timeout=4)
+                if resp.status_code == 200 and alt_node in resp.json():
+                    caps["animatediff"] = True
+                    break
+            except Exception:
+                pass
+
+    # 3. Check SVD
+    try:
+        resp, _ = safe_comfyui_request("GET", "/object_info/SVD_img2vid_Conditioning", base_url=base_url, timeout=4)
+        if resp.status_code == 200 and "SVD_img2vid_Conditioning" in resp.json():
+            caps["svd"] = True
+    except Exception:
+        pass
+
+    caps["checkpoint"] = get_available_checkpoint(base_url)
+    caps["sd15_checkpoint"] = get_available_checkpoint(base_url, prefer_sd15=True)
+
+    if caps["vhs"] and caps["animatediff"] and caps["motion_model"]:
+        caps["can_generate_video"] = True
+
+    return caps
+
+
+def generate_contextual_scene_prompts(
+    script_json: Dict[str, Any],
+    topic_data: Dict[str, Any],
+    num_scenes: int = 6,
+) -> List[str]:
+    """
+    Uses Ollama LLM to generate rich, cinematographic scene descriptions from the full narrative.
+    Instead of literal keyword searches, creates prompts that convey the underlying metabolic,
+    biological, and philosophical meaning of each narrative beat.
+    """
+    eng_script = script_json.get("english_script", {})
+    hook = eng_script.get("hook", "")
+    body = eng_script.get("body", "")
+    cta = eng_script.get("cta", "")
+
+    cards = script_json.get("cards", {})
+    warning_title = cards.get("warning_title", "")
+    warning_sub = cards.get("warning_subtitle", "")
+    remedy_title = cards.get("remedy_title", "")
+    remedy_sub = cards.get("remedy_subtitle", "")
+
+    subject = topic_data.get("subject") or script_json.get("topic", "Ayurvedic Health")
+    key_fact = topic_data.get("key_fact", "")
+    dosha = topic_data.get("dosha", "Digestive & Metabolic Balance")
+
+    system_prompt = f"""You are an elite cinematic visual director and prompt engineer for National Geographic / BBC-style medical and wellness documentaries.
+Your task is to generate exactly {num_scenes} vivid, photorealistic, documentary-grade visual prompts for an AI text-to-image/video model (SDXL / Stable Diffusion).
+
+CORE PHILOSOPHY:
+Do NOT produce generic literal depictions of random isolated keywords (e.g. do not just show a literal clock for '24 hours', or a generic person smiling).
+Instead, each scene prompt MUST visually communicate the underlying conceptual narrative, metabolic biological mechanisms, emotional tension, and therapeutic wisdom of that specific beat in the video.
+
+NARRATIVE ARC REQUIREMENTS (Chronological):
+- Early scenes: Visualise the routine habit, contrast, tension, or the harmful action (e.g. ice water pouring over hot embers, extinguishing digestive fire).
+- Middle scenes: Visualise the internal biological mechanism, cellular/metabolic dynamics, toxic stagnation (Ama/sludge) or impaired digestive fire, rich glowing amber/obsidian medical cinematography.
+- Later scenes: Visualise the authentic ancient preparation, steaming spiced botanical infusion, raw medicinal roots and copper vessels, followed by rejuvenated holistic vitality.
+
+VISUAL STYLE GUIDELINES:
+- Photorealistic 8k, National Geographic documentary cinematography.
+- Dark obsidian slate backgrounds, dramatic warm golden Rembrandt rim lighting, macro focus, shallow depth of field, subtle rising steam or ambient glow.
+- Strictly NO text, no logos, no typography, no watermarks, no split screens, no cartoons.
+- Keep each scene prompt between 25 and 45 words, focused purely on visual sensory descriptors (lighting, textures, mood, camera framing).
+
+Output MUST be strictly valid JSON matching:
+{{
+  "scene_prompts": [
+    "Scene 1 description...",
+    "Scene 2 description...",
+    "Scene 3 description...",
+    "Scene 4 description...",
+    "Scene 5 description...",
+    "Scene 6 description..."
+  ]
+}}"""
+
+    user_prompt = f"""Generate {num_scenes} contextual documentary scene prompts for:
+Subject: {subject}
+Key Medical/Health Fact: {key_fact}
+System/Constitution: {dosha}
+
+Full Narrative Script:
+[HOOK]: {hook}
+[BODY]: {body}
+[CTA]: {cta}
+
+Core Health Warning: {warning_title} ({warning_sub})
+Actionable Ancient Remedy: {remedy_title} ({remedy_sub})
+
+Return exactly {num_scenes} rich cinematic scene prompts in JSON."""
+
+    try:
+        from common.ollama_client import query_ollama_json
+        data = query_ollama_json(prompt=user_prompt, system=system_prompt, timeout=90)
+        raw_prompts = data.get("scene_prompts", [])
+        if isinstance(raw_prompts, list) and len(raw_prompts) > 0:
+            prompts = [str(p).strip() for p in raw_prompts if str(p).strip()]
+            if len(prompts) >= min(3, num_scenes):
+                logger.info(f"[+] Successfully generated {len(prompts)} contextual LLM scene prompts.")
+                return prompts[:num_scenes]
+    except Exception as e:
+        logger.warning(f"Contextual LLM scene prompt generation failed ({e}). Falling back to algorithmic prompts.")
+
+    return []
+
+
 def construct_cinematic_ayurveda_prompt(subject: str, scene_type: str = "macro") -> str:
     """Creates a hyper-realistic, documentary-grade visual prompt adapted to the subject query."""
     subj_lower = subject.lower()
+
+    # If the subject is already a rich contextual prompt (e.g. from LLM scene generator), preserve it
+    if len(subject.split()) > 15 or "photorealistic" in subj_lower or "documentary" in subj_lower:
+        if "zero text" not in subj_lower and "no text" not in subj_lower:
+            return f"{subject.rstrip('. ')}, National Geographic documentary style, zero text, photorealistic 8k."
+        return subject
 
     # Anatomy, bacteria, gut fire, internal organs
     if any(k in subj_lower for k in ["anatomy", "bacteria", "gut", "stomach", "digest", "intestine", "internal"]):
@@ -325,16 +515,179 @@ def generate_comfyui_image(
         return None
 
 
+def generate_comfyui_video(
+    prompt_text: str,
+    output_path: Path,
+    negative_prompt: Optional[str] = None,
+    base_url: Optional[str] = None,
+    num_frames: int = 24,
+    frame_rate: int = 8,
+    timeout_sec: int = 600,
+) -> Optional[Path]:
+    """
+    Generates a 9:16 short video clip via ComfyUI AnimateDiff + VHS_VideoCombine.
+    Falls back gracefully if AnimateDiff or motion models are unavailable.
+    Returns output_path if successful, None otherwise.
+    """
+    if not is_comfyui_available(base_url):
+        return None
+
+    caps = detect_comfyui_capabilities(base_url)
+    if not caps.get("can_generate_video"):
+        logger.debug("ComfyUI server lacks AnimateDiff or VHS nodes. Video generation skipped.")
+        return None
+
+    ckpt_name = caps.get("sd15_checkpoint") or caps.get("checkpoint")
+    motion_model = caps.get("motion_model") or get_available_motion_model(base_url)
+
+    if not ckpt_name or not motion_model:
+        logger.warning(f"Missing required models for video: ckpt={ckpt_name}, motion_model={motion_model}")
+        return None
+
+    seed = random.randint(1, 1_000_000_000)
+    client_id = str(uuid.uuid4())
+    neg_text = (
+        negative_prompt
+        or "text, watermark, logo, font, subtitle, cartoon, illustration, drawing, painting, bad anatomy, deformed, blurry, static, flicker"
+    )
+
+    # 512x768 is the optimal 9:16 portrait resolution for SD1.5 AnimateDiff
+    width, height = 512, 768
+    steps, cfg = 20, 7.0
+
+    prompt_graph = {
+        "1": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {"ckpt_name": ckpt_name},
+        },
+        "2": {
+            "class_type": "ADE_LoadAnimateDiffModel",
+            "inputs": {"model_name": motion_model},
+        },
+        "3": {
+            "class_type": "ADE_ApplyAnimateDiffModel",
+            "inputs": {
+                "model": ["1", 0],
+                "motion_model": ["2", 0],
+            },
+        },
+        "4": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {"width": width, "height": height, "batch_size": num_frames},
+        },
+        "5": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": prompt_text, "clip": ["1", 1]},
+        },
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": neg_text, "clip": ["1", 1]},
+        },
+        "7": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": steps,
+                "cfg": cfg,
+                "sampler_name": "euler_ancestral",
+                "scheduler": "normal",
+                "denoise": 1.0,
+                "model": ["3", 0],
+                "positive": ["5", 0],
+                "negative": ["6", 0],
+                "latent_image": ["4", 0],
+            },
+        },
+        "8": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["7", 0], "vae": ["1", 2]},
+        },
+        "9": {
+            "class_type": "VHS_VideoCombine",
+            "inputs": {
+                "images": ["8", 0],
+                "frame_rate": frame_rate,
+                "loop_count": 0,
+                "filename_prefix": "ayurveda_anim",
+                "format": "video/h264-mp4",
+                "pingpong": false,
+                "save_output": true,
+            },
+        },
+    }
+
+    try:
+        logger.info(f"Submitting AnimateDiff video prompt to ComfyUI ({ckpt_name} + {motion_model}, {num_frames} frames): {prompt_text[:60]}...")
+        resp, reachable_url = safe_comfyui_request(
+            "POST",
+            "/prompt",
+            base_url=base_url,
+            json={"prompt": prompt_graph, "client_id": client_id},
+            timeout=10,
+        )
+
+        if resp.status_code != 200:
+            logger.warning(f"ComfyUI video prompt submission failed: {resp.status_code} - {resp.text}")
+            return None
+
+        prompt_id = resp.json().get("prompt_id")
+        if not prompt_id:
+            return None
+
+        start_time = time.time()
+        while time.time() - start_time < timeout_sec:
+            try:
+                h_resp, _ = safe_comfyui_request("GET", f"/history/{prompt_id}", base_url=reachable_url, timeout=5)
+                if h_resp.status_code == 200:
+                    h_data = h_resp.json()
+                    if prompt_id in h_data:
+                        history_entry = h_data[prompt_id]
+                        outputs = history_entry.get("outputs", {})
+                        for node_id, node_out in outputs.items():
+                            video_list = node_out.get("gifs") or node_out.get("videos") or node_out.get("images") or []
+                            if video_list:
+                                vid_info = video_list[0]
+                                filename = vid_info.get("filename")
+                                subfolder = vid_info.get("subfolder", "")
+                                vid_type = vid_info.get("type", "output")
+
+                                v_resp, _ = safe_comfyui_request(
+                                    "GET",
+                                    f"/view?filename={filename}&subfolder={subfolder}&type={vid_type}",
+                                    base_url=reachable_url,
+                                    timeout=60,
+                                )
+                                if v_resp.status_code == 200 and len(v_resp.content) > 1000:
+                                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                                    with open(output_path, "wb") as f:
+                                        f.write(v_resp.content)
+                                    logger.info(f"[+] Successfully generated ComfyUI video saved to {output_path}")
+                                    return output_path
+            except Exception as poll_err:
+                logger.debug(f"Polling ComfyUI video: {poll_err}")
+
+            time.sleep(2.5)
+
+        logger.warning(f"ComfyUI video generation timed out after {timeout_sec}s for prompt_id: {prompt_id}")
+        return None
+    except Exception as e:
+        logger.warning(f"ComfyUI video generation error: {e}")
+        return None
+
+
 def generate_scene_visuals(
     topic_data: Dict[str, Any],
     output_dir: Path,
     queries: Optional[List[str]] = None,
+    script_json: Optional[Dict[str, Any]] = None,
     max_frames: int = 6,
 ) -> List[str]:
     """
-    Generates cinematic AI visual frames for the video scenes via ComfyUI.
-    Uses the script's visual queries to generate matching scene imagery.
-    Returns list of saved image file paths.
+    Generates cinematic AI visual frames or video clips for the video scenes via ComfyUI.
+    Uses contextual LLM prompts from the full narrative script when available.
+    Automatically generates video clips if AnimateDiff is available on ComfyUI,
+    otherwise generates photorealistic still images.
+    Returns list of saved visual file paths (.mp4 or .jpg).
     """
     if not is_comfyui_available():
         return []
@@ -342,33 +695,69 @@ def generate_scene_visuals(
     output_dir.mkdir(parents=True, exist_ok=True)
     visual_paths: List[str] = []
 
-    # Use queries if available to match the narrative beats exactly
-    if queries and len(queries) > 0:
-        subjects_to_generate = queries[:max_frames]
+    # 1. Determine prompts: prefer contextual LLM prompts from full narrative
+    scene_prompts: List[str] = []
+    if script_json:
+        scene_prompts = generate_contextual_scene_prompts(
+            script_json=script_json,
+            topic_data=topic_data,
+            num_scenes=max_frames,
+        )
+
+    # Fallback to visual queries or topic subjects if contextual LLM prompts unavailable
+    if not scene_prompts:
+        if queries and len(queries) > 0:
+            scene_prompts = [construct_cinematic_ayurveda_prompt(q) for q in queries[:max_frames]]
+        else:
+            subject = topic_data.get("subject", "Digestive Fire and Gut Health")
+            key_fact = topic_data.get("key_fact", "Warm spiced botanical decoction stimulating digestion")
+            fallback_subjects = [
+                f"Ice water freezing internal digestive heat ({subject})",
+                f"Translucent anatomical gut digestion ({subject})",
+                f"Congealed metabolic stagnation in intestines ({key_fact})",
+                f"Warm herbal preparation ({key_fact})",
+                f"Healthy energized vitality and digestion balance",
+            ]
+            scene_prompts = [construct_cinematic_ayurveda_prompt(s) for s in fallback_subjects[:max_frames]]
+
+    logger.info(f"Generating {len(scene_prompts)} ComfyUI scene visuals for topic: '{topic_data.get('subject', '')}'...")
+
+    # 2. Check capabilities for video vs image
+    caps = detect_comfyui_capabilities()
+    can_video = caps.get("can_generate_video", False)
+    if can_video:
+        logger.info(f"[+] ComfyUI AnimateDiff video generation available! Motion model: {caps.get('motion_model')}")
     else:
-        subject = topic_data.get("subject", "Digestive Fire and Gut Health")
-        key_fact = topic_data.get("key_fact", "Warm spiced botanical decoction stimulating digestion")
-        subjects_to_generate = [
-            f"Ice water freezing internal digestive heat ({subject})",
-            f"Translucent anatomical gut digestion ({subject})",
-            f"Congealed metabolic stagnation in intestines ({key_fact})",
-            f"Warm herbal preparation ({key_fact})",
-            f"Healthy energized vitality and digestion balance",
-        ]
+        logger.info("[*] ComfyUI text-to-image mode active (generating high-res portrait stills).")
 
-    logger.info(f"Generating {len(subjects_to_generate)} ComfyUI scene frames for topic: '{topic_data.get('subject', '')}'...")
+    # 3. Generate scenes
+    for idx, prompt in enumerate(scene_prompts, 1):
+        target_video = output_dir / f"scene_{idx}.mp4"
+        target_image = output_dir / f"scene_{idx}.jpg"
 
-    for idx, subj in enumerate(subjects_to_generate, 1):
-        target_file = output_dir / f"scene_{idx}.jpg"
-        if target_file.exists() and target_file.stat().st_size > 1000:
-            logger.info(f"Reusing cached ComfyUI visual: {target_file.name}")
-            visual_paths.append(str(target_file))
+        # Check existing cache
+        if target_video.exists() and target_video.stat().st_size > 1000:
+            logger.info(f"Reusing cached ComfyUI visual video: {target_video.name}")
+            visual_paths.append(str(target_video))
+            continue
+        if target_image.exists() and target_image.stat().st_size > 1000:
+            logger.info(f"Reusing cached ComfyUI visual image: {target_image.name}")
+            visual_paths.append(str(target_image))
             continue
 
-        prompt = construct_cinematic_ayurveda_prompt(subj)
-        logger.info(f"Rendering ComfyUI frame {idx}/{len(subjects_to_generate)}: '{subj[:50]}'...")
-        result = generate_comfyui_image(prompt, target_file)
-        if result and target_file.exists() and target_file.stat().st_size > 1000:
-            visual_paths.append(str(target_file))
+        generated_file: Optional[Path] = None
+
+        # Try video first if supported
+        if can_video:
+            logger.info(f"Rendering ComfyUI AnimateDiff video {idx}/{len(scene_prompts)}: '{prompt[:50]}'...")
+            generated_file = generate_comfyui_video(prompt, target_video)
+
+        # Fallback to image if video not supported or video generation failed
+        if not generated_file or not target_video.exists() or target_video.stat().st_size < 1000:
+            logger.info(f"Rendering ComfyUI image {idx}/{len(scene_prompts)}: '{prompt[:50]}'...")
+            generated_file = generate_comfyui_image(prompt, target_image)
+
+        if generated_file and generated_file.exists() and generated_file.stat().st_size > 1000:
+            visual_paths.append(str(generated_file))
 
     return visual_paths

@@ -225,15 +225,16 @@ def generate_video_assets(
     # Priority 1: Check ComfyUI (defaults to http://0.0.0.0:8188/ unless overridden by COMFYUI_URL)
     logger.info("Checking ComfyUI availability for bespoke visual generation...")
     if is_comfyui_available():
-        logger.info(f"[*] ComfyUI server active! Generating photorealistic AI visual frames for {len(stock_queries)} narrative beats...")
+        logger.info(f"[*] ComfyUI server active! Generating photorealistic AI visuals for {len(stock_queries)} narrative beats...")
         ai_paths = generate_scene_visuals(
             topic_data=selected_topic,
             output_dir=work_dir / "ai_visuals",
             queries=stock_queries,
+            script_json=script_json,
         )
         visual_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
         if visual_clips:
-            logger.info(f"[+] Successfully generated {len(visual_clips)} bespoke ComfyUI visual frames. Bypassing stock downloads.")
+            logger.info(f"[+] Successfully generated {len(visual_clips)} bespoke ComfyUI visuals. Bypassing stock downloads.")
         else:
             logger.warning("ComfyUI generation returned 0 valid frames. Falling back to stock footage...")
     else:
