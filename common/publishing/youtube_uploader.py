@@ -48,33 +48,34 @@ def resolve_youtube_token_path() -> Path:
 
 
 def resolve_youtube_client_secrets_path() -> Path:
-    """Discovers client_secret.json across candidate paths and filename patterns."""
+    """Returns the standardized path for client_secrets.json."""
     env_secret = os.getenv("YOUTUBE_CLIENT_SECRETS_FILE")
     if env_secret:
         p = Path(env_secret).resolve()
-        if p.exists():
+        if p.exists() and p.stat().st_size > 10:
             return p
 
-    search_dirs = [
-        SECRETS_DIR,
-        Path.cwd() / "secrets",
-        Path.cwd(),
-        PROJECT_ROOT,
-    ]
-    for d in search_dirs:
-        if not d.exists():
-            continue
-        for name in ["client_secret.json", "client_secrets.json"]:
-            p = d / name
-            if p.exists() and p.stat().st_size > 10:
-                return p.resolve()
-        # Wildcard match (Google Cloud Console default download: client_secret_*.json)
-        for p in d.glob("client_secret*.json"):
-            if p.exists() and p.stat().st_size > 10:
-                return p.resolve()
+    canonical = (SECRETS_DIR / "client_secrets.json").resolve()
+    if canonical.exists() and canonical.stat().st_size > 10:
+        return canonical
 
-    # Default fallback
-    return (SECRETS_DIR / "client_secret.json").resolve()
+    # If legacy singular client_secret.json exists, auto-migrate to client_secrets.json
+    legacy_file = (SECRETS_DIR / "client_secret.json").resolve()
+    if legacy_file.exists() and legacy_file.stat().st_size > 10 and not canonical.exists():
+        try:
+            import shutil
+            shutil.copyfile(str(legacy_file), str(canonical))
+            logger.info(f"Migrated legacy '{legacy_file.name}' to standardized '{canonical.name}'")
+            return canonical
+        except Exception:
+            pass
+
+    # Check working directory secrets folder
+    cwd_secrets = (Path.cwd() / "secrets" / "client_secrets.json").resolve()
+    if cwd_secrets.exists() and cwd_secrets.stat().st_size > 10:
+        return cwd_secrets
+
+    return canonical
 
 
 DEFAULT_CLIENT_SECRETS = str(resolve_youtube_client_secrets_path())
