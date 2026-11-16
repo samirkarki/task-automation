@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sys
+import time
 from typing import Any, Dict, List, Optional, Union
 import requests
 
@@ -55,7 +56,7 @@ def query_ollama(
     model: Optional[str] = None,
     fallback_models: Optional[List[str]] = None,
     enforce_json: bool = True,
-    timeout: int = 120,
+    timeout: int = 240,
     api_url: Optional[str] = None,
 ) -> str:
     """
@@ -90,10 +91,14 @@ def query_ollama(
             return response_text
 
         except requests.exceptions.ConnectionError as conn_err:
-            logger.error(f"Cannot reach Ollama at {endpoint}. Ensure Ollama is running ('ollama serve').")
-            raise conn_err
+            logger.warning(
+                f"Connection dropped or unreachable for model '{target_model}' at {endpoint}: {conn_err}. "
+                "Pausing 3s before retry/fallback..."
+            )
+            last_error = conn_err
+            time.sleep(3)
         except requests.exceptions.HTTPError as http_err:
-            logger.warning(f"Model '{target_model}' returned HTTP {resp.status_code}. Trying next model...")
+            logger.warning(f"Model '{target_model}' returned HTTP {getattr(resp, 'status_code', 'error')}. Trying next model...")
             last_error = http_err
         except Exception as err:
             logger.warning(f"Error querying model '{target_model}': {err}")
@@ -102,12 +107,33 @@ def query_ollama(
     raise RuntimeError(f"All Ollama models failed ({candidates}). Last error: {last_error}")
 
 
+def unload_ollama_model(model: Optional[str] = None, api_url: Optional[str] = None) -> bool:
+    """
+    Immediately unloads the given model from GPU VRAM by sending keep_alive: 0.
+    Frees VRAM for subsequent GPU workloads like ComfyUI AnimateDiff.
+    """
+    target_model = model or DEFAULT_MODEL
+    endpoint = api_url or DEFAULT_OLLAMA_URL
+    try:
+        resp = requests.post(
+            endpoint,
+            json={"model": target_model, "keep_alive": 0},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            logger.info(f"[+] Unloaded Ollama model '{target_model}' from GPU VRAM (keep_alive: 0).")
+            return True
+    except Exception as e:
+        logger.debug(f"Could not unload Ollama model '{target_model}': {e}")
+    return False
+
+
 def query_ollama_json(
     prompt: str,
     system: Optional[str] = None,
     model: Optional[str] = None,
     fallback_models: Optional[List[str]] = None,
-    timeout: int = 120,
+    timeout: int = 240,
 ) -> Dict[str, Any]:
     """Queries Ollama and parses the response into a structured JSON dict."""
     raw_response = query_ollama(

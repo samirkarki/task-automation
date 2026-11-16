@@ -984,6 +984,24 @@ def generate_comfyui_video(
         return None
 
 
+def free_comfyui_memory(base_url: Optional[str] = None) -> bool:
+    """Tells ComfyUI to unload models from VRAM and free memory."""
+    try:
+        resp, _ = safe_comfyui_request(
+            "POST",
+            "/free",
+            base_url=base_url,
+            json={"unload_models": True, "free_memory": True},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            logger.info("[+] Freed ComfyUI VRAM models.")
+            return True
+    except Exception as e:
+        logger.debug(f"Could not free ComfyUI memory: {e}")
+    return False
+
+
 def generate_scene_visuals(
     topic_data: Dict[str, Any],
     output_dir: Path,
@@ -1031,6 +1049,13 @@ def generate_scene_visuals(
 
     logger.info(f"Generating {len(scene_prompts)} ComfyUI scene visuals for topic: '{topic_data.get('subject', '')}'...")
 
+    # Free Ollama LLM from GPU VRAM so ComfyUI has maximum memory for AnimateDiff
+    try:
+        from common.ollama_client import unload_ollama_model
+        unload_ollama_model()
+    except Exception:
+        pass
+
     # 2. Check capabilities for video vs image
     caps = detect_comfyui_capabilities()
     can_video = caps.get("can_generate_video", False)
@@ -1069,6 +1094,12 @@ def generate_scene_visuals(
 
         if generated_file and generated_file.exists() and generated_file.stat().st_size > 1000:
             visual_paths.append(str(generated_file))
+
+    # Free ComfyUI models from VRAM after generation batch completes
+    try:
+        free_comfyui_memory()
+    except Exception:
+        pass
 
     return visual_paths
 

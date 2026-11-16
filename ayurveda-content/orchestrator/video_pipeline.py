@@ -42,7 +42,7 @@ from common.audio_mastering import master_voice_with_ambient
 
 from topic_catalog import pick_random_topic, generate_title_variants, CATEGORIES
 from analytics_feedback import AyurvedaAnalyticsDB, FeedbackOptimizer
-from ai_visuals import is_comfyui_available, generate_scene_visuals, diagnose_comfyui, COMFYUI_URL
+from ai_visuals import is_comfyui_available, generate_scene_visuals, diagnose_comfyui, free_comfyui_memory, COMFYUI_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ayurveda.pipeline")
@@ -118,6 +118,12 @@ def generate_video_assets(
 
     selected_topic = topic_data or pick_random_topic(category_key=feedback.get("top_category"))
     logger.info(f"[*] Selected Topic: '{selected_topic['subject']}' (Category: {selected_topic['category_title']})")
+
+    # Free any residual ComfyUI diffusion models from VRAM before Ollama loads 30B LLM
+    try:
+        free_comfyui_memory()
+    except Exception:
+        pass
 
     # 2. Query Ollama with Feedback Directives
     system_prompt = build_system_prompt_with_feedback(directive)
