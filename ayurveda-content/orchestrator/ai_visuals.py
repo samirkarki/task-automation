@@ -429,23 +429,27 @@ def generate_contextual_scene_prompts(
     key_fact = topic_data.get("key_fact", "")
     dosha = topic_data.get("dosha", "Digestive & Metabolic Balance")
 
-    system_prompt = f"""You are an elite cinematic visual director and prompt engineer for National Geographic / BBC-style medical and wellness documentaries.
-Your task is to generate exactly {num_scenes} vivid, photorealistic, documentary-grade visual prompts for an AI text-to-image/video model (SDXL / Stable Diffusion).
+    system_prompt = f"""You are an elite commercial documentary visual director for high-performing BBC / National Geographic health and wellness video shorts.
+Your task is to generate exactly {num_scenes} vivid, photorealistic, visually crystal-clear scene prompts for an AI diffusion model (Stable Diffusion / AnimateDiff).
 
-CORE PHILOSOPHY:
-Do NOT produce generic literal depictions of random isolated keywords (e.g. do not just show a literal clock for '24 hours', or a generic person smiling).
-Instead, each scene prompt MUST visually communicate the underlying conceptual narrative, metabolic biological mechanisms, emotional tension, and therapeutic wisdom of that specific beat in the video.
+CRITICAL DIRECTIVES FOR PROFESSIONAL-GRADE VISUALS:
+1. CONCRETE & TANGIBLE SUBJECTS ONLY:
+   - Every scene MUST depict recognizable real-world foods, bright modern kitchen/dining environments, or relatable human expressions.
+   - ABSOLUTELY FORBIDDEN: abstract internal organs, microscopic biological animations, cellular membranes, "metabolic sludge", glowing body energy x-rays, or unidentifiable brownish slime. Viewers must recognize the scene instantly in 0.2 seconds.
 
-NARRATIVE ARC REQUIREMENTS (Chronological):
-- Early scenes: Visualise the routine habit, contrast, tension, or the harmful action (e.g. ice water pouring over hot embers, extinguishing digestive fire).
-- Middle scenes: Visualise the internal biological mechanism, cellular/metabolic dynamics, toxic stagnation (Ama/sludge) or impaired digestive fire, rich glowing amber/obsidian medical cinematography.
-- Later scenes: Visualise the authentic ancient preparation, steaming spiced botanical infusion, raw medicinal roots and copper vessels, followed by rejuvenated holistic vitality.
+2. CHRONOLOGICAL STORYBOARD ARC (Story-Driven Pacing):
+   - Scene 1 (The Habit / Foods): Appetizing, high-definition shot of the exact foods, ingredients, or morning drink mentioned in the hook (e.g. fresh glass of whole milk next to vibrant sliced citrus fruits on a bright marble kitchen counter).
+   - Scene 2 (The Physical Discomfort): A relatable person experiencing physical discomfort (e.g. person sitting at breakfast table holding their stomach with a bloated expression, natural morning light).
+   - Scene 3 (The Concrete Reaction): Clear physical demonstration (e.g. macro shot of milk reacting with acidic lemon juice in a clear glass container, crisp focus, studio lighting).
+   - Scene 4 (The Symptom / Fatigue): Relatable human emotion (e.g. close-up of a tired person looking in a mirror rubbing their eyes, feeling sluggish).
+   - Scene 5 (The Ancient Remedy): A warm, mouth-watering holistic preparation (e.g. steaming golden herbal ginger tea in a clear glass mug with fresh sliced ginger and raw honey on a sunlit wooden table).
+   - Scene 6 (The Payoff / Vitality): An energized, healthy person outdoors in bright morning sunlight, smiling with genuine vitality and energy.
 
-VISUAL STYLE GUIDELINES:
-- Photorealistic 8k, National Geographic documentary cinematography.
-- Dark obsidian slate backgrounds, dramatic warm golden Rembrandt rim lighting, macro focus, shallow depth of field, subtle rising steam or ambient glow.
-- Strictly NO text, no logos, no typography, no watermarks, no split screens, no cartoons.
-- Keep each scene prompt between 25 and 45 words, focused purely on visual sensory descriptors (lighting, textures, mood, camera framing).
+3. BRIGHT, HIGH-KEY NATURAL LIGHTING (NO GLOOMY CAVES):
+   - Bright natural morning sunlight, clean modern aesthetic, soft warm fill light, vibrant natural colors.
+   - FORBIDDEN: dark obsidian slate, pitch black backgrounds, moody caves, underexposed shadows.
+   - Keep each prompt concise (20-35 words) so the diffusion model stays razor-sharp and tightly focused.
+   - Strictly NO text, no typography, no watermarks, no cartoons, no 3D renders.
 
 Output MUST be strictly valid JSON matching:
 {{
@@ -496,50 +500,41 @@ def construct_cinematic_ayurveda_prompt(subject: str, scene_type: str = "macro")
     # If the subject is already a rich contextual prompt (e.g. from LLM scene generator), preserve it
     if len(subject.split()) > 15 or "photorealistic" in subj_lower or "documentary" in subj_lower:
         if "zero text" not in subj_lower and "no text" not in subj_lower:
-            return f"{subject.rstrip('. ')}, National Geographic documentary style, zero text, photorealistic 8k."
+            return f"{subject.rstrip('. ')}, bright natural sunlight, photorealistic 8k, zero text."
         return subject
 
-    # Anatomy, bacteria, gut fire, internal organs
-    if any(k in subj_lower for k in ["anatomy", "bacteria", "gut", "stomach", "digest", "intestine", "internal"]):
+    # Anatomy, bacteria, gut, stomach, bloating, digestion
+    if any(k in subj_lower for k in ["anatomy", "bacteria", "gut", "stomach", "digest", "intestine", "internal", "bloat", "toxic", "waste", "sludge"]):
         return (
-            f"Sleek minimalist medical anatomical illustration explaining {subject}. "
-            "Dark translucent human torso silhouette, glowing warm golden energy pathways of internal digestive metabolic fire, "
-            "high contrast, dark obsidian background, Apple health documentary aesthetic, clean 8k render, zero text."
+            f"Relatable cinematic documentary photo of a person sitting at a dining table holding their stomach in visible bloating discomfort, "
+            "bright natural morning daylight, clean modern dining room, crisp 8k focus, award-winning health photography, zero text."
         )
-    # Cold liquids, ice water, extinguishing fire
+    # Cold liquids, ice water, cold drinks
     elif any(k in subj_lower for k in ["ice", "cold", "water", "extinguish", "freeze"]):
         return (
-            f"Cinematic 8k photorealistic documentary shot of {subject}. "
-            "A glass of ice water splashing and extinguishing glowing warm embers, dramatic rising steam, "
-            "high contrast, weathered dark obsidian background, National Geographic documentary style, zero text."
-        )
-    # Stale leftovers, toxic waste, fermentation, bloating
-    elif any(k in subj_lower for k in ["stale", "leftover", "toxic", "waste", "bloat", "ferment", "sludge"]):
-        return (
-            f"Cinematic dark medical visualization of {subject}. "
-            "Congealed food particles and metabolic stagnation within stylized digestive system, moody amber backlighting, "
-            "obsidian shadows, hyper-detailed texture, National Geographic documentary style, 8k photorealistic, zero text."
+            f"Cinematic food photography of {subject}. "
+            "A tall clear glass of ice water next to a fresh breakfast plate, bright morning sunlight streaming through window, "
+            "crisp water droplets, clean marble countertop, professional 8k food photography, zero text."
         )
     # Vitality, smiling, healthy person
     elif any(k in subj_lower for k in ["person", "healthy", "glow", "smile", "vitality", "face"]):
         return (
-            f"Cinematic portrait of vibrant healthy energized human representing {subject}. "
-            "Radiant skin and inner digestive vitality, warm golden Rembrandt rim lighting, soft dark slate stone background, "
-            "peaceful confident expression, 85mm portrait lens, National Geographic documentary style, zero text."
+            f"Cinematic portrait of an energized, glowing, healthy person representing {subject}. "
+            "Radiant skin and genuine joyful smile, outdoors in lush green nature, warm golden morning sunshine, "
+            "85mm portrait lens, shallow depth of field, photorealistic 8k, zero text."
         )
-    # Cooking, boiling, herbs, tea, remedies, spices, meals
-    elif any(k in subj_lower for k in ["cook", "pot", "tea", "meal", "herb", "spice", "ginger", "decoction", "remedy", "serve"]):
+    # Cooking, boiling, herbs, tea, remedies, spices, meals, seeds
+    elif any(k in subj_lower for k in ["cook", "pot", "tea", "meal", "herb", "spice", "ginger", "decoction", "remedy", "serve", "seed", "fennel", "milk"]):
         return (
-            f"Close-up of ancient authentic Ayurvedic preparation of {subject}. "
-            "Handcrafted antique bronze and copper vessels, fresh raw organic botanical ingredients, "
-            "dark moody monastery lighting, warm candlelight ambient glow, cinematic composition, photorealistic 8k, zero text."
+            f"Mouth-watering cinematic close-up of {subject}. "
+            "Steaming hot herbal infusion in a clear glass cup, fresh sliced ginger root and aromatic botanical spices on bright sunlit wooden table, "
+            "delicate rising steam, morning sunlight, crisp vibrant colors, professional 8k food photography, zero text."
         )
     else:
         return (
-            f"Cinematic 8k photorealistic documentary macro photography of {subject}. "
-            "Weathered dark slate stone surface, dramatic warm golden Rembrandt rim lighting, "
-            "delicate rising steam, shallow depth of field, 85mm portrait lens, National Geographic documentary style, "
-            "deep obsidian shadows, zero text, hyper-detailed texture."
+            f"Bright cinematic documentary photography of {subject}. "
+            "Sunlit kitchen tabletop setting, clean natural daylight, vivid colors, crisp shallow depth of field, "
+            "professional 8k camera, National Geographic style, zero text."
         )
 
 
@@ -577,7 +572,7 @@ def generate_comfyui_image(
 
         neg_text = (
             negative_prompt
-            or "text, watermark, logo, font, subtitle, cartoon, illustration, drawing, painting, bad anatomy, deformed, blurry"
+            or "dark, underexposed, gloomy, black background, pitch black, obsidian, muddy, abstract, cellular, microscopic, internal organ, medical render, slime, sludge, cartoon, illustration, drawing, painting, 3d render, anime, deformed, bad anatomy, blurry, flicker, static, text, watermark, logo, lowres, noise"
         )
 
         prompt_graph = {
@@ -739,7 +734,7 @@ def generate_comfyui_video(
     client_id = str(uuid.uuid4())
     neg_text = (
         negative_prompt
-        or "text, watermark, logo, font, subtitle, cartoon, illustration, drawing, painting, bad anatomy, deformed, blurry, static, flicker"
+        or "dark, underexposed, gloomy, black background, pitch black, obsidian, muddy, abstract, cellular, microscopic, internal organ, medical render, slime, sludge, cartoon, illustration, drawing, painting, 3d render, anime, deformed, bad anatomy, blurry, flicker, static, text, watermark, logo, lowres, noise"
     )
 
     # 512x768 is the optimal 9:16 portrait resolution for SD1.5 AnimateDiff

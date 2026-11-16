@@ -1,5 +1,5 @@
 import React from "react";
-import { Img, interpolate, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { Img, interpolate, Loop, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 
 export interface VideoSceneItem {
   clip: string;
@@ -124,15 +124,17 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
               }}
             >
               {isVideo ? (
-                <OffthreadVideo
-                  src={resolvedSrc}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    filter: "brightness(0.75) contrast(1.15)",
-                  }}
-                />
+                <Loop durationInFrames={60}>
+                  <OffthreadVideo
+                    src={resolvedSrc}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      filter: "brightness(1.02) contrast(1.02)",
+                    }}
+                  />
+                </Loop>
               ) : (
                 <Img
                   src={resolvedSrc}
@@ -140,9 +142,21 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    filter: "brightness(0.72) contrast(1.18)",
-                    transform: `scale(${1.04 + (idx % 2 === 0 ? 0.08 : -0.04) * ((frame - fromFrame) / Math.max(1, duration))})`,
-                    transition: "transform 0.05s linear",
+                    filter: "brightness(1.02) contrast(1.02)",
+                    transform: `scale(${interpolate(
+                      frame - fromFrame,
+                      [0, Math.max(1, duration)],
+                      [1.0, 1.14],
+                      { extrapolateRight: "clamp" }
+                    )}) translate(${interpolate(
+                      frame - fromFrame,
+                      [0, Math.max(1, duration)],
+                      [0, idx % 2 === 0 ? 12 : -12]
+                    )}px, ${interpolate(
+                      frame - fromFrame,
+                      [0, Math.max(1, duration)],
+                      [0, -8]
+                    )}px)`,
                   }}
                 />
               )}
@@ -151,28 +165,16 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
         );
       })}
 
-      {/* Cinematic Dark Vignette & Gradient Overlays for High Legibility */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          background:
-            "radial-gradient(circle at center, transparent 40%, rgba(0, 0, 0, 0.75) 100%)",
-          pointerEvents: "none",
-        }}
-      />
+      {/* Subtle bottom shadow exclusively behind lower captions for crisp text legibility without dimming the video */}
       <div
         style={{
           position: "absolute",
           bottom: 0,
           left: 0,
           width: "100%",
-          height: "45%",
+          height: "25%",
           background:
-            "linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, transparent 100%)",
+            "linear-gradient(to top, rgba(0, 0, 0, 0.45) 0%, transparent 100%)",
           pointerEvents: "none",
         }}
       />

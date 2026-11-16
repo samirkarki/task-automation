@@ -52,7 +52,7 @@ export const InfoCard: React.FC<{ card?: InfoCardData }> = ({ card }) => {
     <div
       style={{
         position: "absolute",
-        top: 280,
+        top: 230,
         left: 0,
         right: 0,
         display: "flex",

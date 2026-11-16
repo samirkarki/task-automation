@@ -17,6 +17,17 @@ export const HeaderBadge: React.FC<HeaderBadgeProps> = ({
     extrapolateRight: "clamp",
   });
 
+  // Fade out large topic title after initial hook (first 4.5 seconds / 135 frames)
+  // This opens up 70%+ of the screen for clear, unobstructed visual footage & info cards
+  const titleOpacity = interpolate(frame, [110, 135], [1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const titleTranslateY = interpolate(frame, [110, 135], [0, -12], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
   return (
     <div
       style={{
@@ -82,7 +93,7 @@ export const HeaderBadge: React.FC<HeaderBadgeProps> = ({
           <span>{badgeText}</span>
         </div>
 
-        {topicTitle && (
+        {topicTitle && titleOpacity > 0.01 && (
           <div
             style={{
               color: "#F8FAFC",
@@ -91,6 +102,8 @@ export const HeaderBadge: React.FC<HeaderBadgeProps> = ({
               maxWidth: "920px",
               lineHeight: 1.25,
               textShadow: "0 4px 16px rgba(0, 0, 0, 0.8)",
+              opacity: titleOpacity,
+              transform: `translateY(${titleTranslateY}px)`,
             }}
           >
             {topicTitle}

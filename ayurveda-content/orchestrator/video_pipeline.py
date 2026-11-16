@@ -71,21 +71,27 @@ CRITICAL RULES:
      * Explain the toxic consequence (undigested food fermenting into toxic sludge, bloating, and fatigue).
      * Provide 1 actionable ancient remedy with clear instructions (sip warm water, ginger tea, or chew seeds).
    - "cta": Compelling invitation to follow for daily gut health and holistic wellness secrets (10-14 words).
-5. VISUAL SEARCH QUERIES: Provide 6 to 8 specific, high-retention cinematic search queries matching each phase of the script in chronological order (e.g. pouring ice water, stomach anatomy, bloated belly discomfort, pouring hot herbal tea, slicing fresh ginger, healthy energized person).
+5. VISUAL SEARCH QUERIES: Provide 6 to 8 concrete, real-world, highly photographic search queries in chronological order.
+   - Query 1: The exact food, beverage, or morning habit on a bright kitchen/dining table (e.g. 'fresh milk citrus fruits kitchen').
+   - Query 2: A relatable person holding stomach in visible bloating discomfort ('person holding stomach bloating pain dining').
+   - Query 3: Concrete culinary reaction or preparation ('pouring milk and lemon juice reaction glass').
+   - Query 4: Relatable tiredness or fatigue ('tired person rubbing eyes fatigue morning').
+   - Query 5: Fresh, delicious steaming herbal remedy ('steaming herbal tea cup pouring ginger').
+   - Query 6: Healthy, vibrant person smiling in bright morning sun ('healthy smiling person outdoor morning sunshine').
+   CRITICAL: DO NOT use abstract medical terms like 'anatomy', 'bacteria', 'toxin', or 'sludge' in search queries, as stock libraries return ugly 3D medical animations. Use realistic human and food search terms.
 
 Output exact JSON schema:
 {{
   "topic": "Clean topic name",
   "category": "Category name",
   "visual_search_queries": [
-    "query 1: hook visual",
-    "query 2: stomach/anatomy visual",
-    "query 3: mistake/reaction visual",
-    "query 4: consequence/discomfort visual",
-    "query 5: fermenting/toxin visual",
-    "query 6: ancient fix/warm tea visual",
-    "query 7: preparation/spices visual",
-    "query 8: vitality/happy wellness visual"
+    "query 1: breakfast/habit food setting",
+    "query 2: person bloating discomfort dining",
+    "query 3: concrete ingredient reaction/clash",
+    "query 4: tired person fatigue morning",
+    "query 5: steaming herbal tea pouring",
+    "query 6: fresh ginger spices honey table",
+    "query 7: healthy energized person outdoor"
   ],
   "english_script": {{
     "hook": "Opening hook sentence.",
@@ -141,36 +147,33 @@ def generate_video_assets(
         if not use_mock_on_offline:
             raise
         logger.warning(f"Ollama unavailable ({e}). Using comprehensive catalog-guided fallback script for testing...")
+        subj = selected_topic.get("subject", "Digestive Fire and Gut Health")
+        key_f = selected_topic.get("key_fact", "Warm digestion stimulates natural enzyme activity")
         script_json = {
-            "topic": selected_topic["subject"],
+            "topic": subj,
             "category": selected_topic["category_title"],
             "visual_search_queries": selected_topic.get("keywords") or [
-                "glass ice water pouring",
-                "stomach digestion gut anatomy",
-                "drinking cold water table",
-                "bloated stomach pain belly",
-                "fermentation gut health",
-                "pouring hot steaming herbal tea",
-                "fresh ginger root slicing kitchen",
-                "healthy energetic smiling person",
+                f"{subj} kitchen table morning",
+                "person holding stomach bloated discomfort dining",
+                "steaming herbal ginger tea cup honey",
+                "healthy smiling person outdoor morning sunshine",
             ],
             "english_script": {
-                "hook": f"Stop drinking ice-cold water with your meals! You are unknowingly shutting down your body's digestive power.",
+                "hook": f"Here is why {subj.lower()} can silently disrupt your gut health, and how to fix it.",
                 "body": (
-                    "In ancient health science, your stomach breaks down food using an internal metabolic heat known as digestive fire. "
-                    "When you drink ice-cold water while eating, you instantly extinguish this digestive fire, freezing your stomach enzymes. "
-                    "This forces dietary fats to solidify and congeal, halting digestion. Undigested food then sits and ferments in your intestines, "
-                    "accumulating into toxic metabolic sludge that causes severe bloating, gas, brain fog, and chronic fatigue. "
-                    "Instead, follow the golden rule: drink warm water or sip fresh ginger tea with your meals. "
-                    "Warm liquids ignite your digestive enzymes, melt fats smoothly, and keep your gut feeling light and energized."
+                    f"In ancient holistic science, your stomach breaks down food using an internal metabolic heat known as digestive fire. "
+                    f"When you make this common mistake, {key_f.lower()}. "
+                    "Undigested food then sits and ferments in your intestines, accumulating into toxic metabolic waste that causes severe bloating, gas, and chronic fatigue. "
+                    "Instead, follow the golden holistic rule: support your digestive fire with warm botanical spices, soothing herbal teas, and mindful food combinations. "
+                    "This protects your gastric enzymes and keeps your gut feeling light, balanced, and energized all day."
                 ),
                 "cta": "Follow for daily holistic gut health secrets to heal your body naturally!",
             },
             "cards": {
-                "warning_title": "The Fatal Mistake: Iced Drinks With Meals",
-                "warning_subtitle": "Ice-cold water extinguishes digestive fire, congealing fats and fermenting toxic waste in the gut.",
-                "remedy_title": "The Ancient Fix: Sip Warm Liquids",
-                "remedy_subtitle": "Drink warm water or ginger tea with meals to stimulate digestive enzymes and eliminate bloating.",
+                "warning_title": f"The Mistake: {subj[:35]}",
+                "warning_subtitle": f"{key_f[:90]}. Traps undigested toxins in the intestines.",
+                "remedy_title": "The Ancient Fix: Warm Digestion",
+                "remedy_subtitle": "Support internal digestive fire with warm digestive herbs and balanced food timings.",
             },
         }
 
@@ -215,16 +218,15 @@ def generate_video_assets(
                 })
 
     # 5. Fetch Visual Footage Matching Chronological Narrative Beats
-    stock_queries = script_json.get("visual_search_queries") or selected_topic.get("keywords") or [
-        "glass ice water pouring",
-        "stomach digestion gut anatomy",
-        "drinking cold water table",
-        "bloated stomach pain belly",
-        "fermentation gut health",
-        "pouring hot steaming herbal tea",
-        "fresh ginger root slicing kitchen",
-        "healthy energetic smiling person",
+    subj = selected_topic.get("subject", "Ayurvedic wellness")
+    fallback_stock = [
+        f"{subj} kitchen table morning",
+        "person holding stomach bloated discomfort dining",
+        f"{selected_topic.get('key_fact', 'herbal remedy')} preparation",
+        "steaming herbal ginger tea cup honey",
+        "healthy smiling person outdoor morning sunshine",
     ]
+    stock_queries = script_json.get("visual_search_queries") or selected_topic.get("keywords") or fallback_stock
 
     visual_clips: List[Path] = []
 
