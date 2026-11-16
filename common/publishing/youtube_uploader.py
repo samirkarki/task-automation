@@ -214,10 +214,13 @@ def upload_short_to_youtube(
     if privacy_status not in ("public", "unlisted", "private"):
         privacy_status = "public"
 
-    title = metadata.get("title", metadata.get("title_a", "Ayurvedic Insights #Shorts"))
-    if "#Shorts" not in title and "#shorts" not in title:
-        title = f"{title} #Shorts"
-    title = title[:100]
+    raw_title = metadata.get("title", metadata.get("title_a", "Ayurvedic Insights #Shorts")).strip()
+    if "#Shorts" not in raw_title and "#shorts" not in raw_title:
+        # Guarantee "#Shorts" fits within YouTube's 100 character limit without truncation
+        max_base_len = 100 - len(" #Shorts")
+        title = f"{raw_title[:max_base_len].rstrip()} #Shorts"
+    else:
+        title = raw_title[:100]
 
     description = metadata.get("description", metadata.get("description_a", ""))
     tags = metadata.get("tags", ["Shorts", "Health", "Ayurveda"])
