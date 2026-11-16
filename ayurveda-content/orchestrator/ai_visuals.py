@@ -122,6 +122,35 @@ def is_comfyui_available(base_url: Optional[str] = None) -> bool:
     return available
 
 
+def extract_combo_options(input_def: Any) -> List[str]:
+    """
+    Extracts combo/dropdown options from ComfyUI /object_info parameter definition.
+    Handles both ComfyUI schema formats:
+    1. Modern schema: ['COMBO', {'multiselect': False, 'options': ['v3_sd15_mm.ckpt', ...]}]
+    2. Legacy schema: [['v3_sd15_mm.ckpt', ...], {'default': 'v3_sd15_mm.ckpt'}]
+    """
+    if not isinstance(input_def, (list, tuple)) or len(input_def) == 0:
+        return []
+
+    # Modern schema: index 1 is a dict containing 'options' list
+    if len(input_def) > 1 and isinstance(input_def[1], dict) and "options" in input_def[1]:
+        opts = input_def[1]["options"]
+        if isinstance(opts, list):
+            return [str(opt).strip() for opt in opts if str(opt).strip()]
+
+    # Legacy schema: index 0 is a list of options
+    if isinstance(input_def[0], list):
+        return [str(opt).strip() for opt in input_def[0] if str(opt).strip()]
+
+    # Fallback: index 0 is a dict containing 'options'
+    if isinstance(input_def[0], dict) and "options" in input_def[0]:
+        opts = input_def[0]["options"]
+        if isinstance(opts, list):
+            return [str(opt).strip() for opt in opts if str(opt).strip()]
+
+    return []
+
+
 def get_available_checkpoint(base_url: Optional[str] = None, prefer_sd15: bool = False) -> Optional[str]:
     """
     Discovers available checkpoint models installed in the ComfyUI server.
@@ -132,13 +161,14 @@ def get_available_checkpoint(base_url: Optional[str] = None, prefer_sd15: bool =
         resp, _ = safe_comfyui_request("GET", "/object_info/CheckpointLoaderSimple", base_url=base_url, timeout=4)
         if resp.status_code == 200:
             data = resp.json()
-            ckpt_list = (
+            ckpt_def = (
                 data.get("CheckpointLoaderSimple", {})
                 .get("input", {})
                 .get("required", {})
-                .get("ckpt_name", [[]])[0]
+                .get("ckpt_name")
             )
-            if ckpt_list and isinstance(ckpt_list, list) and len(ckpt_list) > 0:
+            ckpt_list = extract_combo_options(ckpt_def)
+            if ckpt_list:
                 if prefer_sd15:
                     for ckpt in ckpt_list:
                         c_lower = ckpt.lower()
@@ -170,8 +200,8 @@ def get_available_motion_model(base_url: Optional[str] = None) -> Optional[str]:
                 req = data.get("input", {}).get("required", {})
                 for p_name in ["model_name", "motion_model", "motion_module", "animatediff_model"]:
                     if p_name in req:
-                        models = req[p_name][0]
-                        if models and isinstance(models, list) and len(models) > 0:
+                        models = extract_combo_options(req[p_name])
+                        if models:
                             for m in models:
                                 if any(k in str(m).lower() for k in ["v3", "v2", "mm_sd_v15"]):
                                     return str(m)
@@ -223,17 +253,19 @@ def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any
     # 2. Checkpoints
     ckpt_list: List[str] = []
     if "CheckpointLoaderSimple" in all_nodes:
-        ckpt_list = (
+        ckpt_def = (
             all_nodes["CheckpointLoaderSimple"]
             .get("input", {})
             .get("required", {})
-            .get("ckpt_name", [[]])[0]
+            .get("ckpt_name")
         )
+        ckpt_list = extract_combo_options(ckpt_def)
     if not ckpt_list:
         try:
             resp, _ = safe_comfyui_request("GET", "/object_info/CheckpointLoaderSimple", base_url=base_url, timeout=4)
             if resp.status_code == 200:
-                ckpt_list = resp.json().get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[]])[0]
+                ckpt_def = resp.json().get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name")
+                ckpt_list = extract_combo_options(ckpt_def)
         except Exception:
             pass
 
@@ -311,12 +343,10 @@ def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any
             req = node_info.get("input", {}).get("required", {})
             for p_name in ["model_name", "motion_model", "motion_module", "animatediff_model"]:
                 if p_name in req:
-                    model_choices = req[p_name][0]
-                    if isinstance(model_choices, list):
-                        for m in model_choices:
-                            m_str = str(m).strip()
-                            if m_str and m_str not in found_motion_models:
-                                found_motion_models.append(m_str)
+                    model_choices = extract_combo_options(req[p_name])
+                    for m in model_choices:
+                        if m and m not in found_motion_models:
+                            found_motion_models.append(m)
 
     caps["available_motion_models"] = found_motion_models
     if found_motion_models:
