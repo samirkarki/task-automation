@@ -288,11 +288,13 @@ def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any
     # 3. AnimateDiff Node Discovery
     known_ad_nodes = [
         "ADE_LoadAnimateDiffModel",
+        "ADE_ApplyAnimateDiffModelSimple",
+        "ADE_ApplyAnimateDiffModel",
+        "ADE_UseEvolvedSampling",
         "ADE_AnimateDiffLoaderWithContext",
         "AnimateDiffLoader",
         "AnimateDiffLoaderV1",
         "AnimateDiffModuleLoader",
-        "ADE_ApplyAnimateDiffModel",
         "AnimateDiffCombine",
     ]
 
@@ -704,7 +706,7 @@ def generate_comfyui_video(
     output_path: Path,
     negative_prompt: Optional[str] = None,
     base_url: Optional[str] = None,
-    num_frames: int = 24,
+    num_frames: int = 16,
     frame_rate: int = 8,
     timeout_sec: int = 600,
 ) -> Optional[Path]:
@@ -770,14 +772,56 @@ def generate_comfyui_video(
             "class_type": "ADE_LoadAnimateDiffModel",
             "inputs": {"model_name": motion_model},
         }
-        prompt_graph["3"] = {
-            "class_type": "ADE_ApplyAnimateDiffModel",
+
+        # ComfyUI-AnimateDiff-Evolved Gen2 node chain:
+        # 1. Loader outputs MOTION_MODEL_ADE (Node 2)
+        # 2. Apply node outputs M_MODELS bundle (Node 3)
+        # 3. UseEvolvedSampling node patches checkpoint MODEL with M_MODELS for KSampler (Node 10)
+        ad_nodes = caps.get("animatediff_nodes", [])
+        if "ADE_ApplyAnimateDiffModelSimple" in ad_nodes:
+            prompt_graph["3"] = {
+                "class_type": "ADE_ApplyAnimateDiffModelSimple",
+                "inputs": {
+                    "motion_model": ["2", 0],
+                },
+            }
+        else:
+            prompt_graph["3"] = {
+                "class_type": "ADE_ApplyAnimateDiffModel",
+                "inputs": {
+                    "motion_model": ["2", 0],
+                    "start_percent": 0.0,
+                    "end_percent": 1.0,
+                },
+            }
+
+        # Query ADE_UseEvolvedSampling beta_schedule options
+        beta_schedule = "autoselect"
+        try:
+            resp, _ = safe_comfyui_request("GET", "/object_info/ADE_UseEvolvedSampling", base_url=base_url, timeout=3)
+            if resp.status_code == 200 and "ADE_UseEvolvedSampling" in resp.json():
+                node_spec = resp.json()["ADE_UseEvolvedSampling"]
+                b_opts = extract_combo_options(node_spec.get("input", {}).get("required", {}).get("beta_schedule"))
+                if b_opts:
+                    for pref in ["autoselect", "sqrt_linear (AnimateDiff)", "sqrt_linear", "linear"]:
+                        match = next((opt for opt in b_opts if pref.lower() in str(opt).lower()), None)
+                        if match:
+                            beta_schedule = match
+                            break
+                    else:
+                        beta_schedule = b_opts[0]
+        except Exception:
+            pass
+
+        prompt_graph["10"] = {
+            "class_type": "ADE_UseEvolvedSampling",
             "inputs": {
                 "model": ["1", 0],
-                "motion_model": ["2", 0],
+                "beta_schedule": beta_schedule,
+                "m_models": ["3", 0],
             },
         }
-        model_ref = ["3", 0]
+        model_ref = ["10", 0]
     elif loader_node == "ADE_AnimateDiffLoaderWithContext":
         prompt_graph["3"] = {
             "class_type": "ADE_AnimateDiffLoaderWithContext",
