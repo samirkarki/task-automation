@@ -1006,7 +1006,7 @@ def generate_scene_visuals(
             logger.info(f"Reusing cached ComfyUI visual video: {target_video.name}")
             visual_paths.append(str(target_video))
             continue
-        if target_image.exists() and target_image.stat().st_size > 1000:
+        if not can_video and target_image.exists() and target_image.stat().st_size > 1000:
             logger.info(f"Reusing cached ComfyUI visual image: {target_image.name}")
             visual_paths.append(str(target_image))
             continue
