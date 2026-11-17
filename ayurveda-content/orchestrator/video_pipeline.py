@@ -11,6 +11,7 @@ Orchestrates:
 7. Performance analytics logging & Multi-Platform Publishing (YouTube, TikTok, Instagram)
 """
 
+import concurrent.futures
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -48,6 +49,7 @@ from analytics_feedback import AyurvedaAnalyticsDB, FeedbackOptimizer
 from ai_visuals import (
     is_comfyui_available,
     generate_scene_visuals,
+    generate_contextual_scene_prompts,
     generate_theatrical_i2v_clip,
     generate_master_keyframe,
     diagnose_comfyui,
@@ -191,33 +193,68 @@ def generate_video_assets(
             },
         }
 
-    # 3. Synthesize Speech Audio (Kokoro TTS / Edge-TTS)
+    # 3. Asynchronous Asset Pre-Computation: Audio Pipeline & LLM Storyboard Prompts
+    # Concurrently compute all CPU-bound & LLM assets before triggering ComfyUI,
+    # ensuring the GPU does not sit idle waiting for TTS/Whisper, and evicting
+    # Ollama from VRAM completely before any visual diffusion starts.
     eng_script = script_json.get("english_script", {})
     combined_text = f"{eng_script.get('hook', '')} {eng_script.get('body', '')} {eng_script.get('cta', '')}".strip()
 
     raw_voice_path = work_dir / "voiceover_raw.wav"
     mastered_audio_path = work_dir / "voiceover_master.wav"
-    try:
-        synthesize_with_kokoro(
-            text=combined_text,
-            output_path=raw_voice_path,
-            voice="af_heart",
-            lang_code="a",
-        )
-    except Exception as tts_err:
-        logger.warning(f"Kokoro TTS offline ({tts_err}). Falling back to Edge-TTS...")
-        synthesize_with_edge(text=combined_text, output_path=raw_voice_path)
-
-    # Master audio with deep 432Hz ambient frequency bed (-22dB) for documentary feel
-    try:
-        master_voice_with_ambient(voice_wav=raw_voice_path, output_wav=mastered_audio_path, ambient_db=-22.0)
-    except Exception as master_err:
-        logger.warning(f"Audio mastering fallback to raw: {master_err}")
-        mastered_audio_path = raw_voice_path
-
-    # 4. Generate Word-Level Subtitles via Whisper
     subtitles_path = work_dir / "subtitles.json"
-    whisper_result = transcribe_audio_words(audio_path=mastered_audio_path, output_json_path=subtitles_path)
+
+    def _worker_audio_and_subtitles() -> Tuple[Path, Dict[str, Any], float]:
+        logger.info("[Async Audio] Generating neural speech via Kokoro/Edge-TTS...")
+        try:
+            synthesize_with_kokoro(
+                text=combined_text,
+                output_path=raw_voice_path,
+                voice="af_heart",
+                lang_code="a",
+            )
+        except Exception as tts_err:
+            logger.warning(f"Kokoro TTS offline ({tts_err}). Falling back to Edge-TTS...")
+            synthesize_with_edge(text=combined_text, output_path=raw_voice_path)
+
+        # Master audio with deep 432Hz ambient frequency bed (-22dB) for documentary feel
+        try:
+            master_voice_with_ambient(voice_wav=raw_voice_path, output_wav=mastered_audio_path, ambient_db=-22.0)
+        except Exception as master_err:
+            logger.warning(f"Audio mastering fallback to raw: {master_err}")
+            shutil.copyfile(raw_voice_path, mastered_audio_path)
+
+        logger.info("[Async Audio] Extracting word-level subtitles via Whisper...")
+        w_res = transcribe_audio_words(audio_path=mastered_audio_path, output_json_path=subtitles_path)
+        segs = w_res.get("segments", [])
+        dur = float(segs[-1].get("end", 45.0)) if segs else 45.0
+        return mastered_audio_path, w_res, dur
+
+    def _worker_llm_scene_prompts() -> List[str]:
+        logger.info("[Async LLM] Generating contextual storyboard prompts for narrative beats...")
+        prompts = generate_contextual_scene_prompts(
+            script_json=script_json,
+            topic_data=selected_topic,
+            num_scenes=5,
+        )
+        # Immediately evict all Ollama models from GPU VRAM so ComfyUI has maximum memory
+        try:
+            from common.ollama_client import unload_all_ollama_models
+            unload_all_ollama_models()
+            logger.info("[Async LLM] [+] Evicted all Ollama models from VRAM.")
+        except Exception as e:
+            logger.debug(f"Ollama unload notification: {e}")
+        return prompts
+
+    logger.info("[*] Starting parallel pre-computation of Audio/Whisper and LLM Storyboard Prompts...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        fut_audio = executor.submit(_worker_audio_and_subtitles)
+        fut_prompts = executor.submit(_worker_llm_scene_prompts)
+
+        mastered_audio_path, whisper_result, duration_sec = fut_audio.result()
+        precomputed_scene_prompts = fut_prompts.result()
+
+    logger.info(f"[+] Pre-computed in parallel: Audio duration={duration_sec:.1f}s, Storyboard Prompts={len(precomputed_scene_prompts)}")
 
     # Flatten word timestamps for Remotion
     words_list: List[Dict[str, Any]] = []
@@ -231,11 +268,9 @@ def generate_video_assets(
                     "end": round(float(w.get("end", 0.0)), 2),
                 })
 
-    segments = whisper_result.get("segments", [])
-    duration_sec = float(segments[-1].get("end", 45.0)) if segments else 45.0
     fps = 30
 
-    # 5. Fetch Visual Footage Matching Chronological Narrative Beats
+    # 4. Fetch Visual Footage Matching Chronological Narrative Beats
     subj = selected_topic.get("subject", "Ayurvedic wellness")
     fallback_stock = [
         f"{subj} kitchen table morning",
@@ -262,6 +297,7 @@ def generate_video_assets(
             frame_rate=24, # 24fps cinematic documentary motion
             image_strength=image_strength,
             cfg=cfg,
+            scene_prompts_override=precomputed_scene_prompts,
         )
         ai_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
         ai_has_video = any(p.suffix.lower() in [".mp4", ".webm", ".mov"] for p in ai_clips)

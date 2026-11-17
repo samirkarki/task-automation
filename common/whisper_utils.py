@@ -81,38 +81,50 @@ def transcribe_audio_words(
     model = None
     result = None
 
-    if dev.startswith("cuda"):
-        try:
-            logger.info(f"Loading Whisper '{m_size}' model on device='{dev}' (cuDNN disabled)...")
-            model = whisper.load_model(m_size, device=dev)
-            logger.info(f"Transcribing '{audio_path}' with word_timestamps=True on device='{dev}'...")
+    try:
+        if dev.startswith("cuda"):
+            try:
+                logger.info(f"Loading Whisper '{m_size}' model on device='{dev}' (cuDNN disabled)...")
+                model = whisper.load_model(m_size, device=dev)
+                logger.info(f"Transcribing '{audio_path}' with word_timestamps=True on device='{dev}'...")
+                result = model.transcribe(str(audio_path), word_timestamps=True)
+            except Exception as cuda_err:
+                logger.warning(
+                    f"Whisper CUDA execution failed on '{dev}' ({cuda_err}). "
+                    "Gracefully falling back to device='cpu'..."
+                )
+                if model is not None:
+                    del model
+                    model = None
+                if torch.cuda.is_available():
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                dev = "cpu"
+
+        if result is None:
+            logger.info(f"Loading Whisper '{m_size}' model on device='cpu'...")
+            model = whisper.load_model(m_size, device="cpu")
+            logger.info(f"Transcribing '{audio_path}' with word_timestamps=True on device='cpu'...")
             result = model.transcribe(str(audio_path), word_timestamps=True)
-        except Exception as cuda_err:
-            logger.warning(
-                f"Whisper CUDA execution failed on '{dev}' ({cuda_err}). "
-                "Gracefully falling back to device='cpu'..."
-            )
-            if model is not None:
-                del model
-                model = None
-            if torch.cuda.is_available():
-                try:
-                    torch.cuda.empty_cache()
-                except Exception:
-                    pass
-            dev = "cpu"
 
-    if result is None:
-        logger.info(f"Loading Whisper '{m_size}' model on device='cpu'...")
-        model = whisper.load_model(m_size, device="cpu")
-        logger.info(f"Transcribing '{audio_path}' with word_timestamps=True on device='cpu'...")
-        result = model.transcribe(str(audio_path), word_timestamps=True)
+        if output_json_path:
+            out_p = Path(output_json_path).resolve()
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_p, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+            logger.info(f"Subtitles JSON saved to: {out_p}")
 
-    if output_json_path:
-        out_p = Path(output_json_path).resolve()
-        out_p.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_p, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        logger.info(f"Subtitles JSON saved to: {out_p}")
-
-    return result
+        return result
+    finally:
+        # Explicit VRAM cleanup: release Whisper model from GPU memory completely
+        if model is not None:
+            del model
+            model = None
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+                logger.debug("Whisper VRAM cleanup: torch.cuda.empty_cache() completed.")
+            except Exception:
+                pass

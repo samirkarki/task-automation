@@ -18,6 +18,8 @@ import time
 from typing import Dict, Any, List, Optional, Tuple, Union
 import uuid
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -32,6 +34,34 @@ logger = logging.getLogger("ayurveda.ai_visuals")
 
 # Default ComfyUI URL as requested: http://0.0.0.0:8188/ unless changed from env
 COMFYUI_URL = os.getenv("COMFYUI_URL", "http://0.0.0.0:8188/").strip().rstrip("/")
+
+# -----------------------------------------------------------------------------
+# Persistent HTTP Session with Connection Pooling & Transient Error Retries
+# -----------------------------------------------------------------------------
+_COMFYUI_SESSION: Optional[requests.Session] = None
+
+
+def get_comfyui_session() -> requests.Session:
+    """
+    Returns a process-wide singleton requests.Session configured with:
+    1. HTTP keep-alive connection pooling (pool_connections=10, pool_maxsize=20).
+    2. Transparent retries on transient connection drops / 502/503/504 errors.
+    3. Eliminates TCP socket churn and ephemeral port exhaustion during polling.
+    """
+    global _COMFYUI_SESSION
+    if _COMFYUI_SESSION is None:
+        session = requests.Session()
+        retries = Retry(
+            total=3,
+            backoff_factor=0.3,
+            status_forcelist=[502, 503, 504],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        _COMFYUI_SESSION = session
+    return _COMFYUI_SESSION
 
 
 def get_comfyui_base_urls(configured_url: Optional[str] = None) -> List[str]:
@@ -60,18 +90,19 @@ def get_comfyui_base_urls(configured_url: Optional[str] = None) -> List[str]:
 
 def check_comfyui_connection(base_url: Optional[str] = None, timeout: float = 4.0) -> Tuple[bool, str, Optional[str]]:
     """
-    Tests ComfyUI availability across candidate endpoints.
+    Tests ComfyUI availability across candidate endpoints using pooled persistent session.
     Returns (is_available, diagnostic_message, reachable_url).
     """
     urls = get_comfyui_base_urls(base_url)
     diag_errors: List[str] = []
+    session = get_comfyui_session()
 
     for u in urls:
         # Check /system_stats and /prompt (GET to /prompt returns 405 Method Not Allowed if ComfyUI is up)
         for path in ["/system_stats", "/prompt"]:
             full_url = f"{u}{path}"
             try:
-                resp = requests.get(full_url, timeout=timeout)
+                resp = session.get(full_url, timeout=timeout)
                 if resp.status_code in (200, 405):
                     return True, f"Connected to ComfyUI at {u} (HTTP {resp.status_code})", u
                 diag_errors.append(f"{full_url} -> HTTP {resp.status_code}")
@@ -95,21 +126,161 @@ def safe_comfyui_request(
     base_url: Optional[str] = None,
     **kwargs,
 ) -> Tuple[requests.Response, str]:
-    """Executes an HTTP request across candidate ComfyUI URLs, returning (response, reachable_url)."""
+    """Executes an HTTP request across candidate ComfyUI URLs using pooled persistent connections."""
     urls = get_comfyui_base_urls(base_url)
     last_err: Optional[Exception] = None
     clean_path = path.lstrip("/")
+    session = get_comfyui_session()
 
     for u in urls:
         full_url = f"{u}/{clean_path}"
         try:
-            resp = requests.request(method, full_url, **kwargs)
+            resp = session.request(method, full_url, **kwargs)
             return resp, u
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, OSError) as e:
             last_err = e
             continue
 
     raise last_err or requests.exceptions.ConnectionError(f"Unable to connect to ComfyUI at {urls}")
+
+
+def interrupt_comfyui_execution(base_url: Optional[str] = None) -> bool:
+    """Sends POST /interrupt to ComfyUI to immediately cancel any stuck or hung execution."""
+    try:
+        resp, reachable_url = safe_comfyui_request("POST", "/interrupt", base_url=base_url, timeout=5)
+        if resp.status_code in (200, 204):
+            logger.info(f"[+] Issued POST /interrupt to cancel stuck prompt on ComfyUI at {reachable_url}")
+            return True
+        logger.warning(f"ComfyUI /interrupt returned status {resp.status_code}")
+    except Exception as e:
+        logger.warning(f"Could not send /interrupt to ComfyUI: {e}")
+    return False
+
+
+def get_comfyui_queue(base_url: Optional[str] = None) -> Dict[str, Any]:
+    """Returns queue status: {'running': [...], 'pending': [...]}."""
+    try:
+        resp, _ = safe_comfyui_request("GET", "/queue", base_url=base_url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "running": data.get("queue_running", []),
+                "pending": data.get("queue_pending", []),
+            }
+    except Exception:
+        pass
+    return {"running": [], "pending": []}
+
+
+def poll_comfyui_prompt(
+    prompt_id: str,
+    output_path: Path,
+    base_url: str,
+    timeout_sec: int = 600,
+    expected_type: str = "video",
+    poll_interval: float = 2.0,
+) -> Optional[Path]:
+    """
+    Unified, resilient polling loop for ComfyUI prompts:
+    1. Uses connection-pooled persistent session.
+    2. Immediately detects node execution errors (status_str == 'error') without waiting for timeout.
+    3. Periodically inspects GET /queue to monitor active step progress and detect dropped prompts.
+    4. Downloads outputs via streaming chunks to prevent memory spikes.
+    5. On timeout, invokes POST /interrupt to prevent server queue deadlocks.
+    """
+    start_time = time.time()
+    last_queue_check = 0.0
+    missing_from_queue_count = 0
+    session = get_comfyui_session()
+
+    while time.time() - start_time < timeout_sec:
+        elapsed = time.time() - start_time
+        try:
+            h_resp, reachable_url = safe_comfyui_request("GET", f"/history/{prompt_id}", base_url=base_url, timeout=5)
+            if h_resp.status_code == 200:
+                h_data = h_resp.json()
+                if prompt_id in h_data:
+                    history_entry = h_data[prompt_id]
+                    status_info = history_entry.get("status", {})
+
+                    # Fast-fail on ComfyUI node execution errors
+                    if status_info.get("status_str") == "error":
+                        messages = status_info.get("messages", [])
+                        err_desc = "ComfyUI prompt execution failed."
+                        for m in messages:
+                            if isinstance(m, (list, tuple)) and len(m) > 1 and m[0] == "execution_error":
+                                d = m[1]
+                                err_desc = f"Node '{d.get('node_type')}' (ID {d.get('node_id')}): {d.get('exception_message')}"
+                        logger.error(f"[-] ComfyUI Execution Error: {err_desc}")
+                        return None
+
+                    outputs = history_entry.get("outputs", {})
+                    for node_id, node_out in outputs.items():
+                        item_list = (
+                            node_out.get("gifs")
+                            or node_out.get("videos")
+                            or node_out.get("images")
+                            or []
+                        )
+                        if item_list:
+                            item_info = item_list[0]
+                            filename = item_info.get("filename")
+                            subfolder = item_info.get("subfolder", "")
+                            file_type = item_info.get("type", "output")
+
+                            view_url = f"{reachable_url}/view?filename={filename}&subfolder={subfolder}&type={file_type}"
+                            v_resp = session.get(view_url, timeout=60, stream=True)
+                            if v_resp.status_code == 200:
+                                output_path.parent.mkdir(parents=True, exist_ok=True)
+                                file_ext = Path(filename).suffix.lower()
+
+                                temp_download = output_path.with_suffix(file_ext) if file_ext != output_path.suffix.lower() else output_path
+                                with open(temp_download, "wb") as f:
+                                    for chunk in v_resp.iter_content(chunk_size=1024 * 1024):
+                                        if chunk:
+                                            f.write(chunk)
+
+                                if temp_download.exists() and temp_download.stat().st_size > 1000:
+                                    if expected_type == "video" and file_ext in [".webp", ".gif"]:
+                                        if convert_animation_to_mp4(temp_download, output_path):
+                                            try:
+                                                temp_download.unlink()
+                                            except Exception:
+                                                pass
+                                            logger.info(f"[+] Converted animation to MP4: {output_path}")
+                                            return output_path
+                                        return temp_download
+
+                                    logger.info(f"[+] Successfully retrieved ComfyUI {expected_type}: {output_path.name} ({output_path.stat().st_size // 1024} KB)")
+                                    return output_path
+
+            # Periodically inspect queue status every 10 seconds
+            if time.time() - last_queue_check > 10.0:
+                last_queue_check = time.time()
+                q_status = get_comfyui_queue(base_url=base_url)
+                running_ids = [p[1] for p in q_status.get("running", []) if len(p) > 1]
+                pending_ids = [p[1] for p in q_status.get("pending", []) if len(p) > 1]
+
+                if prompt_id in running_ids:
+                    missing_from_queue_count = 0
+                    logger.info(f"[*] ComfyUI actively executing {expected_type} prompt ({elapsed:.0f}s elapsed)...")
+                elif prompt_id in pending_ids:
+                    missing_from_queue_count = 0
+                    pos = pending_ids.index(prompt_id) + 1
+                    logger.info(f"[*] Prompt queued at position #{pos} ({elapsed:.0f}s elapsed)...")
+                else:
+                    missing_from_queue_count += 1
+                    if missing_from_queue_count > 3:
+                        logger.warning(f"Prompt '{prompt_id}' no longer in queue or history after {elapsed:.0f}s. Possible crash.")
+                        return None
+        except Exception as poll_err:
+            logger.debug(f"Polling ComfyUI: {poll_err}")
+
+        time.sleep(poll_interval)
+
+    logger.warning(f"[-] ComfyUI generation timed out after {timeout_sec}s for prompt_id: {prompt_id}")
+    interrupt_comfyui_execution(base_url=base_url)
+    return None
 
 
 def is_comfyui_available(base_url: Optional[str] = None) -> bool:
@@ -260,12 +431,48 @@ def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any
         "available_checkpoints": [],
         "available_nodes": {},
         "missing_for_video": [],
+        "highvram_active": None,
+        "vram_recommendation": None,
+        "gpu_name": None,
+        "vram_total_gb": None,
+        "server_argv": [],
     }
 
     if not is_comfyui_available(base_url):
         return caps
 
     caps["available"] = True
+
+    # 0. Fetch system stats and inspect GPU / VRAM startup flags
+    try:
+        resp, _ = safe_comfyui_request("GET", "/system_stats", base_url=base_url, timeout=4)
+        if resp.status_code == 200 and isinstance(resp.json(), dict):
+            sys_data = resp.json()
+            sys_info = sys_data.get("system", {})
+            argv = sys_info.get("argv", [])
+            caps["server_argv"] = argv
+
+            devices = sys_data.get("devices", [])
+            caps["devices"] = devices
+            if devices:
+                dev0 = devices[0]
+                vram_total_gb = dev0.get("vram_total", 0) / (1024**3)
+                caps["vram_total_gb"] = round(vram_total_gb, 1)
+                caps["gpu_name"] = dev0.get("name", "Unknown GPU")
+
+                if vram_total_gb >= 15.0:
+                    if "--highvram" in argv:
+                        caps["highvram_active"] = True
+                        logger.info(f"[+] ComfyUI running with '--highvram' on {caps['gpu_name']} ({caps['vram_total_gb']}GB VRAM). Optimal for model caching.")
+                    else:
+                        caps["highvram_active"] = False
+                        caps["vram_recommendation"] = "--highvram"
+                        logger.info(
+                            f"[i] ComfyUI running on high-VRAM GPU {caps['gpu_name']} ({caps['vram_total_gb']}GB) without '--highvram'. "
+                            "Recommended: launch ComfyUI with '--highvram' in your tmux session to prevent redundant model offloading between inferences."
+                        )
+    except Exception as e:
+        logger.debug(f"Could not query /system_stats: {e}")
 
     # 1. Fetch full node catalog if available
     all_nodes: Dict[str, Any] = {}
@@ -742,54 +949,15 @@ def generate_comfyui_image(
             logger.warning("No prompt_id returned by ComfyUI.")
             return None
 
-        # Poll history until completion
-        start_time = time.time()
-        while time.time() - start_time < timeout_sec:
-            try:
-                h_resp, _ = safe_comfyui_request("GET", f"/history/{prompt_id}", base_url=reachable_url, timeout=5)
-                if h_resp.status_code == 200:
-                    h_data = h_resp.json()
-                    if prompt_id in h_data:
-                        history_entry = h_data[prompt_id]
-                        status_info = history_entry.get("status", {})
-                        if status_info.get("status_str") == "error":
-                            messages = status_info.get("messages", [])
-                            err_desc = "ComfyUI prompt execution failed."
-                            for m in messages:
-                                if isinstance(m, (list, tuple)) and len(m) > 1 and m[0] == "execution_error":
-                                    d = m[1]
-                                    err_desc = f"Node '{d.get('node_type')}' (ID {d.get('node_id')}): {d.get('exception_message')}"
-                            logger.error(f"[-] ComfyUI Execution Error: {err_desc}")
-                            return None
-
-                        outputs = history_entry.get("outputs", {})
-                        for node_id, node_out in outputs.items():
-                            images = node_out.get("images", [])
-                            if images:
-                                img_info = images[0]
-                                filename = img_info.get("filename")
-                                subfolder = img_info.get("subfolder", "")
-                                img_type = img_info.get("type", "output")
-
-                                v_resp, _ = safe_comfyui_request(
-                                    "GET",
-                                    f"/view?filename={filename}&subfolder={subfolder}&type={img_type}",
-                                    base_url=reachable_url,
-                                    timeout=30,
-                                )
-                                if v_resp.status_code == 200 and len(v_resp.content) > 1000:
-                                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                                    with open(output_path, "wb") as f:
-                                        f.write(v_resp.content)
-                                    logger.info(f"[+] Successfully generated ComfyUI image saved to {output_path}")
-                                    return output_path
-            except Exception as poll_err:
-                logger.debug(f"Polling ComfyUI: {poll_err}")
-
-            time.sleep(1.5)
-
-        logger.warning(f"ComfyUI generation timed out after {timeout_sec}s for prompt_id: {prompt_id}")
-        return None
+        # Poll history and queue until completion using unified resilient handler
+        return poll_comfyui_prompt(
+            prompt_id=prompt_id,
+            output_path=output_path,
+            base_url=reachable_url,
+            timeout_sec=timeout_sec,
+            expected_type="image",
+            poll_interval=1.5,
+        )
     except Exception as e:
         logger.warning(f"ComfyUI generation error: {e}")
         return None
@@ -949,13 +1117,14 @@ def upload_image_to_comfyui(image_path: Union[str, Path], base_url: Optional[str
         return None
 
     urls = get_comfyui_base_urls(base_url)
+    session = get_comfyui_session()
     for u in urls:
         upload_url = f"{u}/upload/image"
         try:
             with open(img_p, "rb") as f:
                 files = {"image": (img_p.name, f, "image/png")}
                 data = {"overwrite": "true", "subfolder": ""}
-                resp = requests.post(upload_url, files=files, data=data, timeout=30)
+                resp = session.post(upload_url, files=files, data=data, timeout=30)
                 if resp.status_code == 200:
                     resp_data = resp.json()
                     uploaded_name = resp_data.get("name") or img_p.name
@@ -1224,73 +1393,23 @@ def generate_theatrical_i2v_clip(
         if not prompt_id:
             return None
 
-        start_time = time.time()
-        while time.time() - start_time < timeout_sec:
-            try:
-                h_resp, _ = safe_comfyui_request("GET", f"/history/{prompt_id}", base_url=reachable_url, timeout=5)
-                if h_resp.status_code == 200:
-                    h_data = h_resp.json()
-                    if prompt_id in h_data:
-                        history_entry = h_data[prompt_id]
-                        status_info = history_entry.get("status", {})
-                        if status_info.get("status_str") == "error":
-                            messages = status_info.get("messages", [])
-                            err_desc = "ComfyUI prompt execution failed."
-                            for m in messages:
-                                if isinstance(m, (list, tuple)) and len(m) > 1 and m[0] == "execution_error":
-                                    d = m[1]
-                                    err_desc = f"Node '{d.get('node_type')}' (ID {d.get('node_id')}): {d.get('exception_message')}"
-                            logger.error(f"[-] ComfyUI Execution Error: {err_desc}")
-                            return None
-                    if prompt_id in h_data:
-                        history_entry = h_data[prompt_id]
-                        outputs = history_entry.get("outputs", {})
-                        for node_id, node_out in outputs.items():
-                            video_list = node_out.get("gifs") or node_out.get("videos") or node_out.get("images") or []
-                            if video_list:
-                                vid_info = video_list[0]
-                                filename = vid_info.get("filename")
-                                subfolder = vid_info.get("subfolder", "")
-                                vid_type = vid_info.get("type", "output")
-
-                                v_resp, _ = safe_comfyui_request(
-                                    "GET",
-                                    f"/view?filename={filename}&subfolder={subfolder}&type={vid_type}",
-                                    base_url=reachable_url,
-                                    timeout=60,
-                                )
-                                if v_resp.status_code == 200 and len(v_resp.content) > 1000:
-                                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                                    file_ext = Path(filename).suffix.lower()
-                                    if file_ext in [".mp4", ".mov", ".m4v"]:
-                                        with open(output_path, "wb") as f:
-                                            f.write(v_resp.content)
-                                        logger.info(f"[+] Successfully generated Theatrical DiT video saved to {output_path}")
-                                        if not keyframe_path or not keyframe_path.exists():
-                                            try:
-                                                target_kf = output_path.with_name(f"{output_path.stem}_keyframe.png")
-                                                subprocess.run(["ffmpeg", "-y", "-i", str(output_path), "-vframes", "1", str(target_kf)], capture_output=True, timeout=10)
-                                            except Exception:
-                                                pass
-                                        return output_path
-                                    elif file_ext in [".webp", ".gif"]:
-                                        temp_anim = output_path.with_suffix(file_ext)
-                                        with open(temp_anim, "wb") as f:
-                                            f.write(v_resp.content)
-                                        if convert_animation_to_mp4(temp_anim, output_path):
-                                            try:
-                                                temp_anim.unlink()
-                                            except Exception:
-                                                pass
-                                            logger.info(f"[+] Converted ComfyUI animated {file_ext} to MP4: {output_path}")
-                                            return output_path
-                                        return temp_anim
-            except Exception as poll_err:
-                logger.debug(f"Polling ComfyUI DiT video: {poll_err}")
-
-            time.sleep(2.5)
-
-        logger.warning(f"ComfyUI DiT video generation timed out after {timeout_sec}s for prompt_id: {prompt_id}")
+        # Poll history and queue until completion using unified resilient handler
+        res_video = poll_comfyui_prompt(
+            prompt_id=prompt_id,
+            output_path=output_path,
+            base_url=reachable_url,
+            timeout_sec=timeout_sec,
+            expected_type="video",
+            poll_interval=2.0,
+        )
+        if res_video and res_video.exists() and res_video.stat().st_size > 1000:
+            if not keyframe_path or not keyframe_path.exists():
+                try:
+                    target_kf = output_path.with_name(f"{output_path.stem}_keyframe.png")
+                    subprocess.run(["ffmpeg", "-y", "-i", str(output_path), "-vframes", "1", str(target_kf)], capture_output=True, timeout=10)
+                except Exception:
+                    pass
+            return res_video
         return None
     except Exception as e:
         logger.warning(f"ComfyUI DiT video generation error: {e}")
@@ -1565,58 +1684,15 @@ def generate_comfyui_video(
         if not prompt_id:
             return None
 
-        start_time = time.time()
-        while time.time() - start_time < timeout_sec:
-            try:
-                h_resp, _ = safe_comfyui_request("GET", f"/history/{prompt_id}", base_url=reachable_url, timeout=5)
-                if h_resp.status_code == 200:
-                    h_data = h_resp.json()
-                    if prompt_id in h_data:
-                        history_entry = h_data[prompt_id]
-                        outputs = history_entry.get("outputs", {})
-                        for node_id, node_out in outputs.items():
-                            video_list = node_out.get("gifs") or node_out.get("videos") or node_out.get("images") or []
-                            if video_list:
-                                vid_info = video_list[0]
-                                filename = vid_info.get("filename")
-                                subfolder = vid_info.get("subfolder", "")
-                                vid_type = vid_info.get("type", "output")
-
-                                v_resp, _ = safe_comfyui_request(
-                                    "GET",
-                                    f"/view?filename={filename}&subfolder={subfolder}&type={vid_type}",
-                                    base_url=reachable_url,
-                                    timeout=60,
-                                )
-                                if v_resp.status_code == 200 and len(v_resp.content) > 1000:
-                                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                                    file_ext = Path(filename).suffix.lower()
-                                    if file_ext in [".mp4", ".mov", ".m4v"]:
-                                        with open(output_path, "wb") as f:
-                                            f.write(v_resp.content)
-                                        logger.info(f"[+] Successfully generated ComfyUI video saved to {output_path}")
-                                        return output_path
-                                    elif file_ext in [".webp", ".gif"]:
-                                        temp_anim = output_path.with_suffix(file_ext)
-                                        with open(temp_anim, "wb") as f:
-                                            f.write(v_resp.content)
-                                        if convert_animation_to_mp4(temp_anim, output_path):
-                                            try:
-                                                temp_anim.unlink()
-                                            except Exception:
-                                                pass
-                                            logger.info(f"[+] Converted ComfyUI animated {file_ext} to MP4: {output_path}")
-                                            return output_path
-                                        else:
-                                            logger.info(f"[+] Saved ComfyUI animated visual to {temp_anim}")
-                                            return temp_anim
-            except Exception as poll_err:
-                logger.debug(f"Polling ComfyUI video: {poll_err}")
-
-            time.sleep(2.5)
-
-        logger.warning(f"ComfyUI video generation timed out after {timeout_sec}s for prompt_id: {prompt_id}")
-        return None
+        # Poll history and queue until completion using unified resilient handler
+        return poll_comfyui_prompt(
+            prompt_id=prompt_id,
+            output_path=output_path,
+            base_url=reachable_url,
+            timeout_sec=timeout_sec,
+            expected_type="video",
+            poll_interval=2.0,
+        )
     except Exception as e:
         logger.warning(f"ComfyUI video generation error: {e}")
         return None
@@ -1650,12 +1726,13 @@ def generate_scene_visuals(
     frame_rate: int = 24,
     image_strength: float = 0.70,
     cfg: float = 3.5,
+    scene_prompts_override: Optional[List[str]] = None,
 ) -> List[str]:
     """
     Generates theatrical AI visual frames or video clips for the video scenes via ComfyUI.
-    Uses contextual LLM prompts from the full narrative script when available.
-    Strictly prioritizes Image-to-Video (I2V) DiT synthesis (LTX-Video / HunyuanVideo)
-    at 24fps with zero identity drift, with graceful fallback to SDXL keyframes.
+    Uses two-phase batching to eliminate GPU model thrashing over PCIe:
+      - Batch Phase 1: Pre-generates all master keyframes (SDXL / RealVisXL loaded ONCE).
+      - Batch Phase 2: Synthesizes all 24fps DiT video clips (LTX-Video loaded ONCE).
     Returns list of saved visual file paths (.mp4 or .jpg/.png).
     """
     if not is_comfyui_available():
@@ -1664,9 +1741,12 @@ def generate_scene_visuals(
     output_dir.mkdir(parents=True, exist_ok=True)
     visual_paths: List[str] = []
 
-    # 1. Determine prompts: prefer contextual LLM prompts from full narrative
+    # 1. Determine prompts: prefer pre-computed prompts, then contextual LLM prompts from full narrative
     scene_prompts: List[str] = []
-    if script_json:
+    if scene_prompts_override and len(scene_prompts_override) > 0:
+        scene_prompts = [str(p).strip() for p in scene_prompts_override if str(p).strip()][:max_frames]
+        logger.info(f"[+] Using {len(scene_prompts)} pre-computed narrative scene prompts.")
+    elif script_json:
         scene_prompts = generate_contextual_scene_prompts(
             script_json=script_json,
             topic_data=topic_data,
@@ -1712,35 +1792,70 @@ def generate_scene_visuals(
         missing_reasons = "; ".join(caps.get("missing_for_video", [])) or "No video nodes detected"
         logger.info(f"[*] ComfyUI master keyframe still image mode active. [Video disabled: {missing_reasons}]")
 
-    # 3. Generate scenes (Strict Image-First -> Video Synthesis)
+    # -------------------------------------------------------------------------
+    # BATCH PHASE 1: Master Keyframe Generation (SDXL / RealVisXL loaded ONCE)
+    # -------------------------------------------------------------------------
+    # Pre-generate all master keyframes back-to-back so RealVisXL stays hot in VRAM.
+    # This prevents swapping between SDXL and LTX-Video on every single scene!
+    keyframes_map: Dict[int, Path] = {}
+
+    if is_dit or not can_video:
+        logger.info(f"[*] Starting Batch Phase 1: Generating/Verifying Master Keyframes for {len(scene_prompts)} scenes...")
+        for idx, prompt in enumerate(scene_prompts, 1):
+            target_video = output_dir / f"scene_{idx}.mp4"
+            keyframe_png = output_dir / f"scene_{idx}_keyframe.png"
+
+            # If final video already exists and is valid, skip keyframe generation
+            if target_video.exists() and target_video.stat().st_size > 1000:
+                continue
+
+            # If keyframe already exists and is valid, reuse
+            if keyframe_png.exists() and keyframe_png.stat().st_size > 1000:
+                logger.info(f"Reusing cached master keyframe {idx}/{len(scene_prompts)}: {keyframe_png.name}")
+                keyframes_map[idx] = keyframe_png
+                continue
+
+            # Generate Phase 1 still image lock
+            logger.info(f"Rendering Phase 1 Master Keyframe {idx}/{len(scene_prompts)}: '{prompt[:50]}'...")
+            gen_kf = generate_master_keyframe(
+                prompt_text=prompt,
+                output_path=keyframe_png,
+                width=768,
+                height=1024,
+            )
+            if gen_kf and keyframe_png.exists() and keyframe_png.stat().st_size > 1000:
+                keyframes_map[idx] = keyframe_png
+            else:
+                target_img = output_dir / f"scene_{idx}.jpg"
+                gen_img = generate_comfyui_image(prompt, target_img)
+                if gen_img and target_img.exists() and target_img.stat().st_size > 1000:
+                    keyframes_map[idx] = target_img
+
+    # -------------------------------------------------------------------------
+    # BATCH PHASE 2: Theatrical DiT Video Synthesis (LTX-Video loaded ONCE)
+    # -------------------------------------------------------------------------
+    # Now generate all 24fps video clips back-to-back so LTX-Video + T5 stay hot in VRAM!
+    logger.info(f"[*] Starting Batch Phase 2: Generating Theatrical 24fps Video Clips for {len(scene_prompts)} scenes...")
     for idx, prompt in enumerate(scene_prompts, 1):
         target_video = output_dir / f"scene_{idx}.mp4"
-        keyframe_png = output_dir / f"scene_{idx}_keyframe.png"
-        target_image = output_dir / f"scene_{idx}.jpg"
+        keyframe_file = keyframes_map.get(idx) or (output_dir / f"scene_{idx}_keyframe.png")
+        if not keyframe_file.exists():
+            keyframe_file = output_dir / f"scene_{idx}.jpg"
 
         # Check existing cache
         if target_video.exists() and target_video.stat().st_size > 1000:
-            logger.info(f"Reusing cached ComfyUI visual video: {target_video.name}")
+            logger.info(f"Reusing cached ComfyUI visual video {idx}/{len(scene_prompts)}: {target_video.name}")
             visual_paths.append(str(target_video))
-            continue
-        if not can_video and keyframe_png.exists() and keyframe_png.stat().st_size > 1000:
-            logger.info(f"Reusing cached ComfyUI master keyframe: {keyframe_png.name}")
-            visual_paths.append(str(keyframe_png))
-            continue
-        if not can_video and target_image.exists() and target_image.stat().st_size > 1000:
-            logger.info(f"Reusing cached ComfyUI visual image: {target_image.name}")
-            visual_paths.append(str(target_image))
             continue
 
         generated_file: Optional[Path] = None
 
-        # Priority 1: Theatrical DiT Image-to-Video Synthesis (LTX-Video @ 24fps)
         if is_dit:
             logger.info(f"Rendering Theatrical DiT I2V video {idx}/{len(scene_prompts)} ({num_frames} frames @ {frame_rate}fps): '{prompt[:50]}'...")
             generated_file = generate_theatrical_i2v_clip(
                 prompt_text=prompt,
                 output_path=target_video,
-                keyframe_image=keyframe_png,
+                keyframe_image=keyframe_file if keyframe_file.exists() else None,
                 num_frames=num_frames,
                 frame_rate=frame_rate,
                 width=768,
@@ -1748,7 +1863,6 @@ def generate_scene_visuals(
                 image_strength=image_strength,
                 cfg=cfg,
             )
-        # Priority 2: Legacy AnimateDiff Fallback
         elif can_video:
             logger.info(f"Rendering ComfyUI AnimateDiff video {idx}/{len(scene_prompts)} ({num_frames} frames @ {frame_rate}fps): '{prompt[:50]}'...")
             generated_file = generate_comfyui_video(
@@ -1758,16 +1872,13 @@ def generate_scene_visuals(
                 frame_rate=min(12, frame_rate),
             )
 
-        # Fallback: Master keyframe image if video failed or unsupported
+        # Fallback to keyframe still if video generation timed out or failed
         if not generated_file or not target_video.exists() or target_video.stat().st_size < 1000:
-            if keyframe_png.exists() and keyframe_png.stat().st_size > 1000:
-                logger.info(f"Using generated master keyframe still {idx}/{len(scene_prompts)}: '{keyframe_png.name}'")
-                generated_file = keyframe_png
+            if keyframe_file.exists() and keyframe_file.stat().st_size > 1000:
+                logger.warning(f"Video {idx} unavailable; falling back to pristine master keyframe: '{keyframe_file.name}'")
+                generated_file = keyframe_file
             else:
-                logger.info(f"Rendering ComfyUI master keyframe image {idx}/{len(scene_prompts)}: '{prompt[:50]}'...")
-                generated_file = generate_master_keyframe(prompt, keyframe_png, width=768, height=1024)
-                if not generated_file or not keyframe_png.exists():
-                    generated_file = generate_comfyui_image(prompt, target_image)
+                logger.warning(f"No visual artifact produced for scene {idx}.")
 
         if generated_file and generated_file.exists() and generated_file.stat().st_size > 1000:
             visual_paths.append(str(generated_file))
@@ -1800,7 +1911,18 @@ def diagnose_comfyui(base_url: Optional[str] = None):
 
     caps = detect_comfyui_capabilities(reachable)
 
-    print("1. THEATRICAL DiT VIDEO NODES REGISTERED:")
+    print("0. HARDWARE & VRAM LIFECYCLE STATUS:")
+    if caps.get("gpu_name"):
+        print(f"   * Device:        {caps.get('gpu_name')} ({caps.get('vram_total_gb')} GB VRAM)")
+    if caps.get("server_argv"):
+        print(f"   * Server Argv:   {' '.join(caps.get('server_argv', []))}")
+    if caps.get("highvram_active") is True:
+        print("   * VRAM Profile:  [+] '--highvram' ACTIVE (optimal model retention in VRAM)")
+    elif caps.get("vram_recommendation"):
+        print(f"   * VRAM Profile:  [!] Notice: GPU has >= 16GB VRAM. Consider launching with '{caps['vram_recommendation']}' to avoid model offloading.")
+    print("   * Connection:    [+] Persistent HTTP/1.1 session pooling with auto-retries enabled")
+
+    print("\n1. THEATRICAL DiT VIDEO NODES REGISTERED:")
     for node in caps.get("dit_nodes", []):
         print(f"   * {node}")
     if not caps.get("dit_nodes"):
