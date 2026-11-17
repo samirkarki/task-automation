@@ -13,9 +13,12 @@ from pathlib import Path
 from typing import Optional, Union, List
 import numpy as np
 
-# Globally disable cuDNN right after importing PyTorch to prevent CUDNN_STATUS_NOT_INITIALIZED
-import torch
-torch.backends.cudnn.enabled = False
+# Globally disable cuDNN right after importing PyTorch if present to prevent CUDNN_STATUS_NOT_INITIALIZED
+try:
+    import torch
+    torch.backends.cudnn.enabled = False
+except ImportError:
+    pass
 
 from common.env_loader import load_project_env
 

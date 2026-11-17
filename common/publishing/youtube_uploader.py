@@ -268,11 +268,20 @@ def upload_short_to_youtube(
         return None
 
 
+# Alias for generic video uploads
+upload_video_to_youtube = upload_short_to_youtube
+
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="YouTube Authentication & Verification Tool")
+    parser = argparse.ArgumentParser(description="YouTube Video Uploader & Authentication Tool")
     parser.add_argument("--test", action="store_true", help="Verify YouTube API connection and print channel info")
     parser.add_argument("--reauth", action="store_true", help="Force new authentication flow")
+    parser.add_argument("--video", type=str, default=None, help="Path to video file (.mp4) to upload")
+    parser.add_argument("--title", type=str, default=None, help="Title of the video (ensure #Shorts is included for vertical videos)")
+    parser.add_argument("--description", type=str, default="Ayurvedic Wellness & Longevity Secrets\n\n#Ayurveda #Wellness #Health #Shorts", help="Description of the video")
+    parser.add_argument("--tags", type=str, default="Ayurveda,Health,Wellness,Shorts", help="Comma-separated tags")
+    parser.add_argument("--privacy", type=str, choices=["public", "unlisted", "private"], default="unlisted", help="YouTube privacy status (default: unlisted)")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate upload without pushing to YouTube")
     args = parser.parse_args()
 
     token_p = resolve_youtube_token_path()
@@ -280,6 +289,47 @@ if __name__ == "__main__":
         logger.info(f"Removing expired/existing token: {token_p}")
         token_p.unlink()
 
+    # Upload flow if --video is provided
+    if args.video:
+        target_path = Path(args.video).resolve()
+        if not target_path.exists():
+            print(f"❌ Error: Video file not found at {target_path}")
+            sys.exit(1)
+
+        upload_title = args.title or f"{target_path.stem.replace('_', ' ').title()} #Shorts"
+        upload_tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+
+        print("\n" + "=" * 65)
+        print(f"🚀 Uploading Video to YouTube ({args.privacy.upper()}):")
+        print(f"   File:        {target_path.name}")
+        print(f"   Title:       {upload_title}")
+        print(f"   Privacy:     {args.privacy}")
+        print(f"   Dry Run:     {args.dry_run}")
+        print("=" * 65 + "\n")
+
+        v_id = upload_short_to_youtube(
+            video_path=target_path,
+            metadata={
+                "title": upload_title,
+                "description": args.description,
+                "tags": upload_tags,
+            },
+            privacy=args.privacy,
+            dry_run=args.dry_run,
+        )
+
+        if v_id:
+            print("\n" + "=" * 65)
+            print(f"✅ Video successfully published!")
+            print(f"   YouTube URL: https://youtu.be/{v_id}")
+            print(f"   Privacy:     {args.privacy}")
+            print("=" * 65 + "\n")
+            sys.exit(0)
+        else:
+            print("❌ Video upload failed. Check logs above.")
+            sys.exit(1)
+
+    # Diagnostic / verification flow
     service = get_authenticated_service()
     if service:
         try:

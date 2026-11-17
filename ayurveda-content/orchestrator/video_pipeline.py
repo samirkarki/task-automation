@@ -26,9 +26,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Globally disable cuDNN right after importing PyTorch to prevent CUDNN_STATUS_NOT_INITIALIZED
-import torch
-torch.backends.cudnn.enabled = False
+# Globally disable cuDNN right after importing PyTorch if present to prevent CUDNN_STATUS_NOT_INITIALIZED
+try:
+    import torch
+    torch.backends.cudnn.enabled = False
+except ImportError:
+    pass
 
 from common.env_loader import load_project_env
 load_project_env()
@@ -45,6 +48,8 @@ from analytics_feedback import AyurvedaAnalyticsDB, FeedbackOptimizer
 from ai_visuals import (
     is_comfyui_available,
     generate_scene_visuals,
+    generate_theatrical_i2v_clip,
+    generate_master_keyframe,
     diagnose_comfyui,
     free_comfyui_memory,
     stitch_continuous_background_video,
@@ -251,8 +256,8 @@ def generate_video_assets(
             queries=stock_queries,
             script_json=script_json,
             max_frames=5,
-            num_frames=48,
-            frame_rate=8,
+            num_frames=97, # ~4.04s @ 24fps theatrical DiT video
+            frame_rate=24, # 24fps cinematic documentary motion
         )
         ai_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
         ai_has_video = any(p.suffix.lower() in [".mp4", ".webm", ".mov"] for p in ai_clips)

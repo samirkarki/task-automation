@@ -110,7 +110,7 @@ def query_ollama(
 def unload_ollama_model(model: Optional[str] = None, api_url: Optional[str] = None) -> bool:
     """
     Immediately unloads the given model from GPU VRAM by sending keep_alive: 0.
-    Frees VRAM for subsequent GPU workloads like ComfyUI AnimateDiff.
+    Frees VRAM for subsequent GPU workloads like ComfyUI DiT video generation.
     """
     target_model = model or DEFAULT_MODEL
     endpoint = api_url or DEFAULT_OLLAMA_URL
@@ -126,6 +126,48 @@ def unload_ollama_model(model: Optional[str] = None, api_url: Optional[str] = No
     except Exception as e:
         logger.debug(f"Could not unload Ollama model '{target_model}': {e}")
     return False
+
+
+def unload_all_ollama_models(base_url: Optional[str] = None) -> bool:
+    """
+    Discovers all currently loaded models in Ollama via /api/ps and evicts them
+    from GPU VRAM by sending keep_alive: 0, guaranteeing maximum VRAM for ComfyUI.
+    """
+    gen_endpoint = base_url or DEFAULT_OLLAMA_URL
+    # Derive root host: e.g. http://localhost:11434 from http://localhost:11434/api/generate
+    ps_endpoint = gen_endpoint.split("/api/")[0] + "/api/ps"
+    generate_endpoint = gen_endpoint.split("/api/")[0] + "/api/generate"
+
+    unloaded_any = False
+    models_to_unload = set([DEFAULT_MODEL, "qwen3-coder:30b", "llama3.1:8b"] + DEFAULT_FALLBACK_MODELS)
+
+    # 1. Query /api/ps for active running models
+    try:
+        ps_resp = requests.get(ps_endpoint, timeout=5)
+        if ps_resp.status_code == 200:
+            active_models = ps_resp.json().get("models", [])
+            for m in active_models:
+                m_name = m.get("name") or m.get("model")
+                if m_name:
+                    models_to_unload.add(m_name)
+    except Exception as ps_err:
+        logger.debug(f"Could not query Ollama /api/ps ({ps_err}). Evicting standard candidate models...")
+
+    # 2. Evict each model with keep_alive: 0
+    for target_model in models_to_unload:
+        try:
+            resp = requests.post(
+                generate_endpoint,
+                json={"model": target_model, "keep_alive": 0},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                logger.info(f"[+] Evicted Ollama model '{target_model}' from GPU VRAM.")
+                unloaded_any = True
+        except Exception:
+            pass
+
+    return unloaded_any
 
 
 def query_ollama_json(
