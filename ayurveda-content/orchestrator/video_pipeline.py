@@ -123,6 +123,8 @@ def generate_video_assets(
     topic_data: Optional[Dict[str, Any]] = None,
     output_dir: Optional[Path] = None,
     use_mock_on_offline: bool = True,
+    image_strength: float = 0.70,
+    cfg: float = 3.5,
 ) -> Dict[str, Any]:
     """Generates script, audio, subtitles, and stock videos for a topic."""
     current_dir = Path(__file__).resolve().parent
@@ -258,6 +260,8 @@ def generate_video_assets(
             max_frames=5,
             num_frames=97, # ~4.04s @ 24fps theatrical DiT video
             frame_rate=24, # 24fps cinematic documentary motion
+            image_strength=image_strength,
+            cfg=cfg,
         )
         ai_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
         ai_has_video = any(p.suffix.lower() in [".mp4", ".webm", ".mov"] for p in ai_clips)
@@ -501,13 +505,19 @@ def run_ayurveda_pipeline(
     publish: bool = False,
     dry_run_publish: bool = True,
     privacy: str = "public",
+    image_strength: float = 0.70,
+    cfg: float = 3.5,
 ) -> Dict[str, Any]:
     """Runs the complete end-to-end automated generation, rendering, and logging flow."""
     logger.info("=== Starting Ayurveda Video Pipeline ===")
 
     # Step 1 & 2: Select topic and generate assets
     topic_data = pick_random_topic(category_key=category_key)
-    assets = generate_video_assets(topic_data=topic_data)
+    assets = generate_video_assets(
+        topic_data=topic_data,
+        image_strength=image_strength,
+        cfg=cfg,
+    )
 
     # Step 3: Render Final 9:16 MP4
     output_video = assets["work_dir"] / "final_ayurveda_short.mp4"
@@ -567,6 +577,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ayurveda Content Automation Pipeline")
     parser.add_argument("--category", type=str, default=None, help="Optional category key")
     parser.add_argument("--diagnose-comfyui", action="store_true", help="Diagnose ComfyUI server models and AnimateDiff capabilities")
+    parser.add_argument("--strength", type=float, default=0.70, help="Image conditioning strength for DiT video (default: 0.70)")
+    parser.add_argument("--cfg", type=float, default=3.5, help="CFG guidance scale for DiT video (default: 3.5)")
     parser.add_argument("--publish", action="store_true", help="Publish video to social platforms")
     parser.add_argument("--live", action="store_true", help="Perform real live publish (without this, publishing is dry-run)")
     parser.add_argument("--privacy", type=str, choices=["public", "unlisted", "private"], default="public", help="YouTube upload privacy status (default: public)")
@@ -581,4 +593,6 @@ if __name__ == "__main__":
         publish=args.publish,
         dry_run_publish=not args.live,
         privacy=args.privacy,
+        image_strength=args.strength,
+        cfg=args.cfg,
     )

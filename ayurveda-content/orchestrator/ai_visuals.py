@@ -1648,6 +1648,8 @@ def generate_scene_visuals(
     max_frames: int = 5,
     num_frames: int = 97,
     frame_rate: int = 24,
+    image_strength: float = 0.70,
+    cfg: float = 3.5,
 ) -> List[str]:
     """
     Generates theatrical AI visual frames or video clips for the video scenes via ComfyUI.
@@ -1743,6 +1745,8 @@ def generate_scene_visuals(
                 frame_rate=frame_rate,
                 width=768,
                 height=1024,
+                image_strength=image_strength,
+                cfg=cfg,
             )
         # Priority 2: Legacy AnimateDiff Fallback
         elif can_video:
