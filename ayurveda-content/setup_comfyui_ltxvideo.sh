@@ -90,7 +90,26 @@ else
     echo "[i] T5-XXL text encoder already present in models directory."
 fi
 
-# 5. Restart ComfyUI in tmux session 'comfy' if active, or restart process
+# 5. Optional: 2D Master Keyframe Checkpoint (SDXL Lightning) for Image-to-Video
+# Checks if an existing 2D image checkpoint is installed. If none found, provides download command.
+HAS_IMAGE_CKPT=false
+for f in "$CHECKPOINTS_DIR"/*; do
+    fname=$(basename "$f" | tr '[:upper:]' '[:lower:]')
+    if [[ "$fname" =~ (sdxl|realvis|juggernaut|flux|turbo|lightning|v1-5) && ! "$fname" =~ (ltx|hunyuan) ]]; then
+        HAS_IMAGE_CKPT=true
+        echo "[i] Found 2D master keyframe image checkpoint: $(basename "$f")"
+        break
+    fi
+done
+
+if [ "$HAS_IMAGE_CKPT" = false ]; then
+    echo "[*] Notice: No 2D image checkpoint found in $CHECKPOINTS_DIR."
+    echo "    LTX-Video will generate 24fps videos in Text-to-Video mode."
+    echo "    If you want the two-stage Image-to-Video pipeline from text, download an SDXL checkpoint, e.g.:"
+    echo "    wget -c 'https://huggingface.co/SG161222/RealVisXL_V5.0_Lightning/resolve/main/RealVisXL_V5.0_Lightning.safetensors' -P '$CHECKPOINTS_DIR/'"
+fi
+
+# 6. Restart ComfyUI in tmux session 'comfy' if active, or restart process
 echo "================================================================="
 echo "[*] Restarting ComfyUI server..."
 echo "================================================================="

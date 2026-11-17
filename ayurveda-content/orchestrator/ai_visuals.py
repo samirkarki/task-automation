@@ -151,9 +151,21 @@ def extract_combo_options(input_def: Any) -> List[str]:
     return []
 
 
+VIDEO_MODEL_KEYWORDS = ["ltx", "hunyuan", "animatediff", "motion", "svd", "cogvideo", "wan", "mochi", "consisti2v"]
+
+
+def is_video_model(name: Optional[str]) -> bool:
+    """Returns True if the checkpoint filename represents a video generation model, not a 2D still image model."""
+    if not name:
+        return False
+    low = str(name).lower()
+    return any(k in low for k in VIDEO_MODEL_KEYWORDS)
+
+
 def get_available_checkpoint(base_url: Optional[str] = None, prefer_sd15: bool = False) -> Optional[str]:
     """
-    Discovers available checkpoint models installed in the ComfyUI server.
+    Discovers available 2D image checkpoint models installed in the ComfyUI server.
+    Strictly filters out Video DiT models (LTX-Video, HunyuanVideo, AnimateDiff).
     If prefer_sd15 is True (e.g., for AnimateDiff), prioritizes SD 1.5 checkpoints.
     Otherwise prioritizes SDXL / photorealistic checkpoints.
     """
@@ -169,15 +181,20 @@ def get_available_checkpoint(base_url: Optional[str] = None, prefer_sd15: bool =
             )
             ckpt_list = extract_combo_options(ckpt_def)
             if ckpt_list:
+                # Strictly filter out video models from 2D image candidates
+                image_ckpts = [c for c in ckpt_list if not is_video_model(c)]
+                if not image_ckpts:
+                    return None
+
                 if prefer_sd15:
-                    for ckpt in ckpt_list:
+                    for ckpt in image_ckpts:
                         c_lower = ckpt.lower()
                         if not any(k in c_lower for k in ["sdxl", "xl", "flux", "cascade"]):
                             return ckpt
-                for ckpt in ckpt_list:
-                    if any(k in ckpt.lower() for k in ["sdxl", "xl", "turbo", "lightning", "flux", "real", "phot"]):
+                for ckpt in image_ckpts:
+                    if any(k in ckpt.lower() for k in ["sdxl", "xl", "turbo", "lightning", "flux", "real", "phot", "juggernaut"]):
                         return ckpt
-                return ckpt_list[0]
+                return image_ckpts[0]
     except Exception as e:
         logger.debug(f"Failed to fetch checkpoint info from ComfyUI: {e}")
     return None
@@ -296,30 +313,35 @@ def detect_comfyui_capabilities(base_url: Optional[str] = None) -> Dict[str, Any
                 caps["hunyuan_checkpoint"] = ckpt
                 break
 
+        # Separate 2D image models from Video DiT models
+        image_ckpts = [c for c in ckpt_list if not is_video_model(c)]
+        caps["available_image_checkpoints"] = image_ckpts
+        caps["has_image_checkpoint"] = bool(image_ckpts)
+
         # Detect high-tier SDXL / FLUX checkpoints for master keyframe generation
-        for ckpt in ckpt_list:
+        for ckpt in image_ckpts:
             c_low = str(ckpt).lower()
-            if any(k in c_low for k in ["realvis", "juggernaut", "flux", "turbo", "lightning", "phot", "epic"]):
+            if any(k in c_low for k in ["realvis", "juggernaut", "flux", "turbo", "lightning", "phot", "epic", "sdxl", "xl"]):
                 caps["keyframe_checkpoint"] = ckpt
                 break
 
-        for ckpt in ckpt_list:
+        for ckpt in image_ckpts:
             c_lower = str(ckpt).lower()
-            if not any(k in c_lower for k in ["sdxl", "xl", "flux", "cascade", "ltx", "hunyuan"]):
+            if not any(k in c_lower for k in ["sdxl", "xl", "flux", "cascade"]):
                 caps["sd15_checkpoint"] = ckpt
                 break
 
-        for ckpt in ckpt_list:
+        for ckpt in image_ckpts:
             if any(k in str(ckpt).lower() for k in ["sdxl", "xl", "turbo", "lightning", "flux", "real", "phot"]):
                 caps["checkpoint"] = ckpt
                 break
 
-        if not caps["checkpoint"] and ckpt_list:
-            caps["checkpoint"] = ckpt_list[0]
-        if not caps["sd15_checkpoint"] and ckpt_list:
-            caps["sd15_checkpoint"] = ckpt_list[0]
-        if not caps["keyframe_checkpoint"]:
-            caps["keyframe_checkpoint"] = caps.get("checkpoint") or (ckpt_list[0] if ckpt_list else None)
+        if not caps["checkpoint"] and image_ckpts:
+            caps["checkpoint"] = image_ckpts[0]
+        if not caps["sd15_checkpoint"] and image_ckpts:
+            caps["sd15_checkpoint"] = image_ckpts[0]
+        if not caps["keyframe_checkpoint"] and image_ckpts:
+            caps["keyframe_checkpoint"] = caps.get("checkpoint") or image_ckpts[0]
 
     # 3. Detect DiT Nodes (LTX-Video / HunyuanVideo)
     known_dit_nodes = [
@@ -623,7 +645,14 @@ def generate_comfyui_image(
 
     try:
         caps = detect_comfyui_capabilities(base_url)
-        ckpt_name = caps.get("keyframe_checkpoint") or get_available_checkpoint(base_url) or "sd_xl_base_1.0.safetensors"
+        ckpt_name = caps.get("keyframe_checkpoint") or get_available_checkpoint(base_url)
+        if not ckpt_name or is_video_model(ckpt_name):
+            logger.warning(
+                f"[-] No valid 2D image checkpoint available in ComfyUI (detected: '{ckpt_name}'). "
+                "Cannot generate 2D master keyframe. A standard SDXL or SD1.5 model is required."
+            )
+            return None
+
         ckpt_lower = ckpt_name.lower()
 
         # Determine optimal resolution and sampling parameters based on model architecture
@@ -695,7 +724,7 @@ def generate_comfyui_image(
             },
         }
 
-        logger.info(f"Submitting prompt to ComfyUI ({ckpt_name}, {width}x{height}): {prompt_text[:60]}...")
+        logger.info(f"Submitting prompt to ComfyUI ({ckpt_name}, {res_w}x{res_h}): {prompt_text[:60]}...")
         resp, reachable_url = safe_comfyui_request(
             "POST",
             "/prompt",
@@ -722,6 +751,17 @@ def generate_comfyui_image(
                     h_data = h_resp.json()
                     if prompt_id in h_data:
                         history_entry = h_data[prompt_id]
+                        status_info = history_entry.get("status", {})
+                        if status_info.get("status_str") == "error":
+                            messages = status_info.get("messages", [])
+                            err_desc = "ComfyUI prompt execution failed."
+                            for m in messages:
+                                if isinstance(m, (list, tuple)) and len(m) > 1 and m[0] == "execution_error":
+                                    d = m[1]
+                                    err_desc = f"Node '{d.get('node_type')}' (ID {d.get('node_id')}): {d.get('exception_message')}"
+                            logger.error(f"[-] ComfyUI Execution Error: {err_desc}")
+                            return None
+
                         outputs = history_entry.get("outputs", {})
                         for node_id, node_out in outputs.items():
                             images = node_out.get("images", [])
@@ -976,36 +1016,38 @@ def generate_theatrical_i2v_clip(
     if not is_comfyui_available(base_url):
         return None
 
-    # Step 1: Ensure Master Keyframe exists (Phase 1 Image Lock)
-    keyframe_path: Path
+    # Step 1: Check for Master Keyframe (Phase 1 Image Lock)
+    keyframe_path: Optional[Path] = None
+    caps = detect_comfyui_capabilities(base_url)
+
     if keyframe_image and Path(keyframe_image).exists() and Path(keyframe_image).stat().st_size > 1000:
         keyframe_path = Path(keyframe_image).resolve()
         logger.info(f"Using provided master keyframe for I2V: {keyframe_path.name}")
-    else:
-        keyframe_path = output_path.with_name(f"{output_path.stem}_keyframe.png")
-        if not keyframe_path.exists() or keyframe_path.stat().st_size < 1000:
-            logger.info(f"Master keyframe missing. Generating Phase 1 image lock: '{keyframe_path.name}'...")
+    elif caps.get("keyframe_checkpoint"):
+        candidate_p = output_path.with_name(f"{output_path.stem}_keyframe.png")
+        if candidate_p.exists() and candidate_p.stat().st_size > 1000:
+            keyframe_path = candidate_p
+            logger.info(f"Reusing cached master keyframe: {keyframe_path.name}")
+        else:
+            logger.info(f"Generating Phase 1 image lock using '{caps.get('keyframe_checkpoint')}': '{candidate_p.name}'...")
             gen_img = generate_master_keyframe(
                 prompt_text=prompt_text,
-                output_path=keyframe_path,
+                output_path=candidate_p,
                 negative_prompt=negative_prompt,
                 base_url=base_url,
                 width=width,
                 height=height,
             )
-            if not gen_img or not keyframe_path.exists() or keyframe_path.stat().st_size < 1000:
-                logger.warning(f"Could not generate master keyframe for '{output_path.name}'")
-                return None
+            if gen_img and candidate_p.exists() and candidate_p.stat().st_size > 1000:
+                keyframe_path = candidate_p
+    else:
+        logger.info("[i] No 2D image checkpoint detected on server. Operating in LTX-Video Text-to-Video mode (EmptyLTXVLatentVideo).")
 
     # Step 2: Discover ComfyUI DiT capabilities
-    caps = detect_comfyui_capabilities(base_url)
     all_nodes = caps.get("available_nodes", {})
     ltx_ckpt = caps.get("ltx_checkpoint") or "ltx-video-2b-v0.9.1.safetensors"
     t5_model = caps.get("t5_model")
     export_node = caps.get("video_export_node") or "VHS_VideoCombine"
-
-    # Step 3: Upload keyframe image to ComfyUI
-    uploaded_name = upload_image_to_comfyui(keyframe_path, base_url=base_url) or keyframe_path.name
 
     seed = random.randint(1, 1_000_000_000)
     client_id = str(uuid.uuid4())
@@ -1025,12 +1067,8 @@ def generate_theatrical_i2v_clip(
         valid_frames = ((num_frames // 8) * 8) + 1
         logger.info(f"Adjusted frame count to LTX-Video 8n+1 requirement: {num_frames} -> {valid_frames}")
 
-    # Step 4: Construct ComfyUI DiT Image-to-Video (I2V) Prompt Graph
+    # Step 3: Construct ComfyUI Prompt Graph (I2V or T2V)
     prompt_graph: Dict[str, Any] = {
-        "1": {
-            "class_type": "LoadImage",
-            "inputs": {"image": uploaded_name},
-        },
         "2": {
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": ltx_ckpt},
@@ -1054,38 +1092,69 @@ def generate_theatrical_i2v_clip(
         "inputs": {"text": motion_neg, "clip": clip_ref},
     }
 
-    # LTXVImgToVideo: injects the locked master keyframe into latent video space
-    prompt_graph["5"] = {
-        "class_type": "LTXVImgToVideo",
-        "inputs": {
-            "image": ["1", 0],
-            "positive": ["3", 0],
-            "negative": ["4", 0],
-            "vae": ["2", 2],
-            "width": width,
-            "height": height,
-            "length": valid_frames,
-            "batch_size": 1,
-            "strength": 1.0,
-        },
-    }
-
-    # KSampler: 25 steps, CFG 3.0, euler sampler
-    prompt_graph["6"] = {
-        "class_type": "KSampler",
-        "inputs": {
-            "seed": seed,
-            "steps": 25,
-            "cfg": 3.0,
-            "sampler_name": "euler",
-            "scheduler": "normal",
-            "denoise": 1.0,
-            "model": ["2", 0],
-            "positive": ["5", 0],
-            "negative": ["5", 1],
-            "latent_image": ["5", 2],
-        },
-    }
+    # Branch A: Image-to-Video (I2V) if keyframe is available
+    if keyframe_path and keyframe_path.exists():
+        uploaded_name = upload_image_to_comfyui(keyframe_path, base_url=base_url) or keyframe_path.name
+        prompt_graph["1"] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": uploaded_name},
+        }
+        prompt_graph["5"] = {
+            "class_type": "LTXVImgToVideo",
+            "inputs": {
+                "image": ["1", 0],
+                "positive": ["3", 0],
+                "negative": ["4", 0],
+                "vae": ["2", 2],
+                "width": width,
+                "height": height,
+                "length": valid_frames,
+                "batch_size": 1,
+                "strength": 1.0,
+            },
+        }
+        prompt_graph["6"] = {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": 25,
+                "cfg": 3.0,
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "denoise": 1.0,
+                "model": ["2", 0],
+                "positive": ["5", 0],
+                "negative": ["5", 1],
+                "latent_image": ["5", 2],
+            },
+        }
+    # Branch B: Text-to-Video (T2V) via EmptyLTXVLatentVideo if no keyframe
+    else:
+        empty_latent_node = "EmptyLTXVLatentVideo" if "EmptyLTXVLatentVideo" in all_nodes else "EmptyLatentVideo"
+        prompt_graph["5"] = {
+            "class_type": empty_latent_node,
+            "inputs": {
+                "width": width,
+                "height": height,
+                "length": valid_frames,
+                "batch_size": 1,
+            },
+        }
+        prompt_graph["6"] = {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": 25,
+                "cfg": 3.0,
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "denoise": 1.0,
+                "model": ["2", 0],
+                "positive": ["3", 0],
+                "negative": ["4", 0],
+                "latent_image": ["5", 0],
+            },
+        }
 
     # VAEDecode using LTX VAE
     prompt_graph["7"] = {
@@ -1101,7 +1170,7 @@ def generate_theatrical_i2v_clip(
                 "images": ["7", 0],
                 "frame_rate": frame_rate,
                 "loop_count": 0,
-                "filename_prefix": "ayurveda_theatrical_i2v",
+                "filename_prefix": "ayurveda_theatrical_dit",
                 "format": "video/h264-mp4",
                 "pingpong": False,
                 "save_output": True,
@@ -1112,7 +1181,7 @@ def generate_theatrical_i2v_clip(
             "class_type": "SaveAnimatedWEBP",
             "inputs": {
                 "images": ["7", 0],
-                "filename_prefix": "ayurveda_theatrical_i2v",
+                "filename_prefix": "ayurveda_theatrical_dit",
                 "fps": float(frame_rate),
                 "lossless": False,
                 "quality": 88,
@@ -1122,14 +1191,15 @@ def generate_theatrical_i2v_clip(
     else:
         prompt_graph["8"] = {
             "class_type": "SaveImage",
-            "inputs": {"filename_prefix": "ayurveda_theatrical_i2v", "images": ["7", 0]},
+            "inputs": {"filename_prefix": "ayurveda_theatrical_dit", "images": ["7", 0]},
         }
 
-    # Step 5: Submit Prompt to ComfyUI REST API
+    # Step 4: Submit Prompt to ComfyUI REST API
     try:
+        mode_label = f"I2V (Keyframe='{keyframe_path.name}')" if keyframe_path else "T2V (EmptyLTXVLatentVideo)"
         logger.info(
-            f"Submitting Theatrical DiT I2V prompt to ComfyUI ({ltx_ckpt}, {valid_frames} frames @ {frame_rate}fps): "
-            f"Keyframe='{keyframe_path.name}' -> '{prompt_text[:50]}'..."
+            f"Submitting Theatrical DiT prompt to ComfyUI [{mode_label}] "
+            f"({ltx_ckpt}, {valid_frames} frames @ {frame_rate}fps): '{prompt_text[:50]}'..."
         )
         resp, reachable_url = safe_comfyui_request(
             "POST",
@@ -1140,7 +1210,7 @@ def generate_theatrical_i2v_clip(
         )
 
         if resp.status_code != 200:
-            logger.warning(f"ComfyUI DiT I2V prompt submission failed: {resp.status_code} - {resp.text}")
+            logger.warning(f"ComfyUI DiT prompt submission failed: {resp.status_code} - {resp.text}")
             return None
 
         prompt_id = resp.json().get("prompt_id")
@@ -1153,6 +1223,18 @@ def generate_theatrical_i2v_clip(
                 h_resp, _ = safe_comfyui_request("GET", f"/history/{prompt_id}", base_url=reachable_url, timeout=5)
                 if h_resp.status_code == 200:
                     h_data = h_resp.json()
+                    if prompt_id in h_data:
+                        history_entry = h_data[prompt_id]
+                        status_info = history_entry.get("status", {})
+                        if status_info.get("status_str") == "error":
+                            messages = status_info.get("messages", [])
+                            err_desc = "ComfyUI prompt execution failed."
+                            for m in messages:
+                                if isinstance(m, (list, tuple)) and len(m) > 1 and m[0] == "execution_error":
+                                    d = m[1]
+                                    err_desc = f"Node '{d.get('node_type')}' (ID {d.get('node_id')}): {d.get('exception_message')}"
+                            logger.error(f"[-] ComfyUI Execution Error: {err_desc}")
+                            return None
                     if prompt_id in h_data:
                         history_entry = h_data[prompt_id]
                         outputs = history_entry.get("outputs", {})
@@ -1176,7 +1258,13 @@ def generate_theatrical_i2v_clip(
                                     if file_ext in [".mp4", ".mov", ".m4v"]:
                                         with open(output_path, "wb") as f:
                                             f.write(v_resp.content)
-                                        logger.info(f"[+] Successfully generated Theatrical DiT I2V video saved to {output_path}")
+                                        logger.info(f"[+] Successfully generated Theatrical DiT video saved to {output_path}")
+                                        if not keyframe_path or not keyframe_path.exists():
+                                            try:
+                                                target_kf = output_path.with_name(f"{output_path.stem}_keyframe.png")
+                                                subprocess.run(["ffmpeg", "-y", "-i", str(output_path), "-vframes", "1", str(target_kf)], capture_output=True, timeout=10)
+                                            except Exception:
+                                                pass
                                         return output_path
                                     elif file_ext in [".webp", ".gif"]:
                                         temp_anim = output_path.with_suffix(file_ext)

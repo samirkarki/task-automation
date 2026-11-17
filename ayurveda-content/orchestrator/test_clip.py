@@ -44,12 +44,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("test_clip")
 
 
-def run_quick_test(prompt: str, upload: bool = False, privacy: str = "unlisted"):
+def run_quick_test(
+    prompt: str,
+    image_path: Optional[str] = None,
+    force_t2v: bool = False,
+    upload: bool = False,
+    privacy: str = "unlisted",
+):
     output_dir = PROJECT_ROOT / "ayurveda-content" / "orchestrator" / "output" / "test_run"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_video = output_dir / "test_clip_4s.mp4"
-    keyframe_img = output_dir / "test_clip_4s_keyframe.png"
+    keyframe_img: Optional[Path] = None
+
+    if image_path:
+        p = Path(image_path).resolve()
+        if p.exists() and p.stat().st_size > 100:
+            keyframe_img = p
+            print(f"[i] Using provided image for Image-to-Video: {keyframe_img.name}")
+        else:
+            print(f"[-] Provided image not found: {image_path}. Continuing...")
 
     print("\n" + "=" * 68)
     print("🎬 4-5s THEATRICAL DiT (LTX-VIDEO) TEST GENERATION")
@@ -58,6 +72,7 @@ def run_quick_test(prompt: str, upload: bool = False, privacy: str = "unlisted")
     print(f"Target:      {output_video}")
     print(f"Frame Count: 97 frames (~4.04s @ 24fps)")
     print(f"Resolution:  768x1024 (9:16 portrait)")
+    print(f"Keyframe:    {keyframe_img.name if keyframe_img else ('Auto (T2V fallback if no 2D model)' if not force_t2v else 'Disabled (Force T2V)')}")
     print("=" * 68 + "\n")
 
     if not is_comfyui_available():
@@ -65,11 +80,11 @@ def run_quick_test(prompt: str, upload: bool = False, privacy: str = "unlisted")
         print("   Please start ComfyUI or run: ./ayurveda-content/setup_comfyui_ltxvideo.sh")
         sys.exit(1)
 
-    print("[*] Starting Phase 1 (Master Keyframe Lock) & Phase 2 (24fps DiT Motion)...")
+    print("[*] Starting Theatrical 24fps DiT Motion Generation...")
     res_path = generate_theatrical_i2v_clip(
         prompt_text=prompt,
         output_path=output_video,
-        keyframe_image=keyframe_img,
+        keyframe_image=keyframe_img if not force_t2v else None,
         num_frames=97, # 4.04s @ 24fps
         frame_rate=24,
         width=768,
@@ -140,8 +155,16 @@ if __name__ == "__main__":
         default="Steaming hot herbal infusion in a brass cup on rustic sunlit wooden table, delicate rising steam, professional 8k documentary cinematography",
         help="Prompt description for keyframe and motion",
     )
+    parser.add_argument("--image", type=str, default=None, help="Optional path to existing keyframe image for Image-to-Video")
+    parser.add_argument("--t2v", action="store_true", help="Force Text-to-Video mode (EmptyLTXVLatentVideo) without keyframe")
     parser.add_argument("--upload", action="store_true", help="Upload the 4s clip to YouTube as Unlisted upon completion")
     parser.add_argument("--privacy", type=str, choices=["unlisted", "private", "public"], default="unlisted", help="YouTube privacy")
     args = parser.parse_args()
 
-    run_quick_test(prompt=args.prompt, upload=args.upload, privacy=args.privacy)
+    run_quick_test(
+        prompt=args.prompt,
+        image_path=args.image,
+        force_t2v=args.t2v,
+        upload=args.upload,
+        privacy=args.privacy,
+    )
