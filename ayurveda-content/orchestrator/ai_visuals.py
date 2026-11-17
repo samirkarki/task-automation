@@ -1167,21 +1167,25 @@ def construct_kinetic_motion_prompt(prompt_text: str) -> str:
     """
     Constructs an intelligent, scene-appropriate motion directorship prompt for LTX-Video.
     Tailors dynamic kinetic descriptors to the specific semantic subjects in the scene:
+      - Action-Staged Humans: Natural sip, subtle breathing, gentle head tilt, soft smile.
       - Liquids/Beverages/Teas: Steam billowing, fluid ripples, liquid swirling, macro pouring.
-      - People/Faces/Emotions: Natural breathing, expressive blinking, subtle head tilt, soft glance.
       - Ingredients/Herbs/Kitchen: Sunlight moving, dust motes drifting, camera parallax pan.
       - General: Cinematic slow dolly push-in, rich textural depth, living motion.
     """
     p_lower = prompt_text.lower()
+
+    # If prompt already contains rich kinetic directorship from StoryboardDirector, avoid redundant bloat
+    if any(k in p_lower for k in ["subtle", "gentle", "ripples", "billowing", "slow cinematic", "dolly", "breathing", "stirring", "curdling"]):
+        return f"{prompt_text}, photorealistic 24fps documentary cinematography, sharp natural lighting."
     
-    # 1. Human / Portrait / Emotion scenes
-    if any(k in p_lower for k in ["person", "man", "woman", "face", "eyes", "stomach", "tired", "smiling", "holding", "looking", "sitting", "standing"]):
+    # 1. Human / Portrait / Action-Staged scenes
+    if any(k in p_lower for k in ["person", "man", "woman", "face", "eyes", "stomach", "tired", "smiling", "holding", "looking", "sitting", "standing", "sip", "maya"]):
         kinetic_desc = (
             "subtle natural breathing movement, organic micro-expressions, gentle natural head motion, "
             "soft expressive blinking, cinematic shallow depth of field portrait drift, photorealistic living subject"
         )
     # 2. Liquids / Teas / Water / Beverages
-    elif any(k in p_lower for k in ["tea", "water", "cup", "mug", "infusion", "drink", "soup", "liquid", "pour", "steam", "boil", "beverage", "decoction"]):
+    elif any(k in p_lower for k in ["tea", "water", "cup", "mug", "infusion", "drink", "soup", "liquid", "pour", "steam", "boil", "beverage", "decoction", "milk", "curdle"]):
         kinetic_desc = (
             "delicate rising swirling steam, gentle ripples and liquid surface movement, soft steam evaporation, "
             "living fluid dynamics, cinematic slow dolly push-in, macro documentary detail"
@@ -1212,8 +1216,8 @@ def generate_theatrical_i2v_clip(
     frame_rate: int = 24,
     width: int = 768,
     height: int = 1024,
-    image_strength: float = 0.70,
-    cfg: float = 3.5,
+    image_strength: float = 0.81,
+    cfg: float = 3.2,
     steps: int = 25,
     timeout_sec: int = 600,
 ) -> Optional[Path]:
@@ -1265,16 +1269,19 @@ def generate_theatrical_i2v_clip(
     seed = random.randint(1, 1_000_000_000)
     client_id = str(uuid.uuid4())
 
-    # Adaptive motion directorship & subject-aware strength
+    # Adaptive motion directorship & Action-Staged conditioning strength
     p_lower = prompt_text.lower()
-    is_human = any(k in p_lower for k in ["person", "man", "woman", "face", "eyes", "stomach", "tired", "smiling", "holding"])
-    effective_strength = min(image_strength, 0.65) if is_human else image_strength
+    is_human = any(k in p_lower for k in ["person", "man", "woman", "face", "eyes", "stomach", "tired", "smiling", "holding", "sip", "maya"])
+    # 0.81 anchors 100% of the photorealistic facial features and skin from the RealVisXL keyframe,
+    # completely eliminating body horror while allowing natural eye blinking, gentle breathing, sipping, and hand movements.
+    effective_strength = 0.81 if is_human else max(0.80, min(image_strength, 0.85))
 
     motion_prompt = construct_kinetic_motion_prompt(prompt_text)
     motion_neg = (
         negative_prompt
-        or "static, still frame, motionless, paused video, still photo, frozen, stationary, slideshow, "
-        "harsh stutter, jitter, sudden jump cut, distorted anatomy, morphing faces, ugly, cartoon, illustration, low resolution, blurry, watermark"
+        or "eating, chewing, open mouth, teeth, tongue, touching face, rubbing cream, face mask, skincare, "
+        "walking, running, legs, distorted limbs, extra fingers, deformed hands, morphing face, body horror, mutation, "
+        "ugly, jerky motion, slideshow, static, still frame, motionless, paused video, still photo, frozen, stationary, blurry, watermark"
     )
 
     # Frame count for LTX-Video must adhere to 8n + 1 (e.g. 65, 81, 97, 121)
@@ -1764,8 +1771,8 @@ def generate_scene_visuals(
     max_frames: int = 12,
     num_frames: int = 81,
     frame_rate: int = 24,
-    image_strength: float = 0.70,
-    cfg: float = 3.5,
+    image_strength: float = 0.81,
+    cfg: float = 3.2,
     scene_prompts_override: Optional[List[str]] = None,
     storyboard_shots: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:

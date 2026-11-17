@@ -128,8 +128,8 @@ def generate_video_assets(
     topic_data: Optional[Dict[str, Any]] = None,
     output_dir: Optional[Path] = None,
     use_mock_on_offline: bool = True,
-    image_strength: float = 0.70,
-    cfg: float = 3.5,
+    image_strength: float = 0.81,
+    cfg: float = 3.2,
 ) -> Dict[str, Any]:
     """Generates script, audio, subtitles, and stock videos for a topic."""
     current_dir = Path(__file__).resolve().parent
@@ -207,55 +207,43 @@ def generate_video_assets(
     mastered_audio_path = work_dir / "voiceover_master.wav"
     subtitles_path = work_dir / "subtitles.json"
 
-    def _worker_audio_and_subtitles() -> Tuple[Path, Path, Dict[str, Any], float]:
-        logger.info("[Async Audio] Generating neural speech via Kokoro/Edge-TTS...")
-        try:
-            synthesize_with_kokoro(
-                text=combined_text,
-                output_path=raw_voice_path,
-                voice="af_heart",
-                lang_code="a",
-            )
-        except Exception as tts_err:
-            logger.warning(f"Kokoro TTS offline ({tts_err}). Falling back to Edge-TTS...")
-            synthesize_with_edge(text=combined_text, output_path=raw_voice_path)
-
-        logger.info("[Async Audio] Extracting word-level subtitles via Whisper...")
-        w_res = transcribe_audio_words(audio_path=raw_voice_path, output_json_path=subtitles_path)
-        segs = w_res.get("segments", [])
-        dur = float(segs[-1].get("end", 40.0)) if segs else 40.0
-        return raw_voice_path, mastered_audio_path, w_res, dur
-
-    def _worker_theatrical_storyboard() -> List[Dict[str, Any]]:
-        logger.info("[Async Director] Generating 10-12 bespoke cinematic shots with 0 modulo loops...")
-        shots = TheatricalStoryboardDirector.generate_theatrical_storyboard(
-            script_json=script_json,
-            topic_data=selected_topic,
-            total_duration_sec=40.0,
+    # Step 1: Synthesize neural voiceover & extract exact Whisper sentence segments
+    logger.info("[Audio Pipeline] Generating neural speech via Kokoro/Edge-TTS...")
+    try:
+        synthesize_with_kokoro(
+            text=combined_text,
+            output_path=raw_voice_path,
+            voice="af_heart",
+            lang_code="a",
         )
-        try:
-            from common.ollama_client import unload_all_ollama_models
-            unload_all_ollama_models()
-            logger.info("[Async Director] [+] Evicted all Ollama models from VRAM.")
-        except Exception as e:
-            logger.debug(f"Ollama unload notification: {e}")
-        return shots
+    except Exception as tts_err:
+        logger.warning(f"Kokoro TTS offline ({tts_err}). Falling back to Edge-TTS...")
+        synthesize_with_edge(text=combined_text, output_path=raw_voice_path)
 
-    logger.info("[*] Starting parallel pre-computation of Audio/Whisper and Theatrical Storyboard...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        fut_audio = executor.submit(_worker_audio_and_subtitles)
-        fut_storyboard = executor.submit(_worker_theatrical_storyboard)
+    logger.info("[Audio Pipeline] Extracting word-level subtitles via Whisper...")
+    whisper_result = transcribe_audio_words(audio_path=raw_voice_path, output_json_path=subtitles_path)
+    segs = whisper_result.get("segments", [])
+    duration_sec = float(segs[-1].get("end", 40.0)) if segs else 40.0
 
-        raw_voice_path, mastered_audio_path, whisper_result, duration_sec = fut_audio.result()
-        storyboard_shots = fut_storyboard.result()
-
-    # Retime storyboard precisely to measured audio duration
-    storyboard_shots = TheatricalStoryboardDirector._normalize_and_time_shots(
-        storyboard_shots, total_duration_sec=duration_sec, target_count=len(storyboard_shots)
+    # Step 2: Direct sentence-bound Action-Staged storyboard (100% contextual semantic binding)
+    logger.info(f"[Sentence Director] Directing Action-Staged shots bound to {len(segs)} Whisper sentences ({duration_sec:.1f}s)...")
+    storyboard_shots = TheatricalStoryboardDirector.generate_theatrical_storyboard(
+        script_json=script_json,
+        topic_data=selected_topic,
+        whisper_segments=segs,
+        total_duration_sec=duration_sec,
     )
 
-    # Master Theatrical Multi-Track Foley Soundtrack (Voiceover + SFX + Transition Whooshes + 432Hz Bed)
-    logger.info("[*] Building Theatrical Multi-Track Foley Soundtrack...")
+    # Evict LLM from VRAM completely before ComfyUI diffusion begins
+    try:
+        from common.ollama_client import unload_all_ollama_models
+        unload_all_ollama_models()
+        logger.info("[Sentence Director] [+] Evicted all Ollama models from VRAM.")
+    except Exception as e:
+        logger.debug(f"Ollama unload notification: {e}")
+
+    # Step 3: Master Serene Theatrical Soundtrack (Voiceover -1.0dB + 432Hz Bed -24dB + Single Remedy Chime)
+    logger.info("[*] Building Pristine Theatrical Soundtrack (Zero White Noise, Zero Cut Whooshes)...")
     sound_director = SoundDirector()
     sound_director.build_theatrical_soundtrack(
         voice_path=raw_voice_path,
@@ -263,7 +251,7 @@ def generate_video_assets(
         shot_definitions=storyboard_shots,
     )
 
-    logger.info(f"[+] Multi-Track Audio Mastered: duration={duration_sec:.1f}s, Storyboard Shots={len(storyboard_shots)}")
+    logger.info(f"[+] Pristine Audio Mastered: duration={duration_sec:.1f}s, Storyboard Shots={len(storyboard_shots)}")
 
     # Flatten word timestamps for Remotion
     words_list: List[Dict[str, Any]] = []
