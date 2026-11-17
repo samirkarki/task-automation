@@ -43,16 +43,16 @@ export const InfoCard: React.FC<{ card?: InfoCardData }> = ({ card }) => {
   const scale = interpolate(enterSpring, [0, 1], [0.92, 1.0]);
 
   const isWarning = type === "warning";
-  const accentColor = isWarning ? "#EF4444" : "#10B981";
-  const glowColor = isWarning ? "rgba(239, 68, 68, 0.4)" : "rgba(16, 185, 129, 0.4)";
+  const accentColor = isWarning ? "#F59E0B" : "#10B981";
+  const glowColor = isWarning ? "rgba(245, 158, 11, 0.4)" : "rgba(16, 185, 129, 0.4)";
   const icon = isWarning ? "⚠️" : "🌿";
-  const tagText = isWarning ? "AYURVEDIC WARNING" : "THE ANCIENT FIX";
+  const tagText = isWarning ? "AYURVEDIC WARNING" : "AYURVEDIC GOLDEN RULE";
 
   return (
     <div
       style={{
         position: "absolute",
-        top: 230,
+        top: 460,
         left: 0,
         right: 0,
         display: "flex",

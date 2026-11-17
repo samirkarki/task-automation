@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-Theatrical Storyboard Director & Action-Staged Framing Engine
-Translates spoken narrative sentences into a synchronized cinematic storyboard.
-Enforces:
-  1. Direct Sentence-to-Visual Semantic Binding (100% contextual relevance to spoken words)
-  2. Action-Staged Keyframing (stages the action in the keyframe to eliminate anatomical horror)
-  3. Natural Human Actions (sipping, stirring, holding, expressive reactions, gentle breathing)
-  4. Macro Physical Science & Liquid Alchemy (curdling, pouring, steam, bubbling, spice grinding)
-  5. Strict prohibition against cosmetic hallucinations (NO face creams, NO face masks)
+Theatrical Storyboard Director & Universal 4-Block Message Engine
+Converts full Ayurvedic scripts into 4 Cohesive, High-Impact Cinematic Message Blocks:
+  1. Block 1: The Arresting Hook & Mistake (Visceral macro demonstration, 0s - ~9s)
+  2. Block 2: The Metabolic Truth & Consequence (Glowing Agni embers / sluggish Ama, ~9s - ~20s)
+  3. Block 3: The Ancient Kitchen Remedy (Artisan hands slicing & simmering spices, ~20s - ~32s)
+  4. Block 4: The Concluding Resolution & Golden Takeaway (Steaming brass cup pour + final climax, ~32s - End)
+
+Strict Constraints:
+  - 85%+ Macro Food Alchemy & Physical Science (Minimizes humans to eliminate AI distortion).
+  - Absolute ban on Nudity, bare skin, exposed chests, bare stomachs, and body caressing.
+  - Universal dynamic semantic adaptation to ANY Ayurvedic topic (honey, curd, milk, ghee, lentils, water, etc.).
 """
 
-import json
 import logging
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,14 +33,14 @@ logger = logging.getLogger("storyboard_director")
 
 class TheatricalStoryboardDirector:
     """
-    Directs cinematic film storyboards for short-form video.
-    Binds visual shot actions directly to spoken narrative sentences.
+    Directs 4 cohesive, broadcast-grade cinematic message blocks for any Ayurvedic Short.
     """
 
-    # Persistent Character Card for character continuity across shots
+    # Persistent Character Anchor (Strictly fully clothed in modest traditional linen)
     DEFAULT_CHARACTER_ANCHOR = (
         "Maya, a 28-year-old South Asian woman with warm brown eyes, loose dark hair tied with a linen wrap, "
-        "wearing an earth-toned olive-green cotton tunic, natural glowing skin in warm directional morning sunlight"
+        "modestly dressed in an earth-toned high-collar olive-green cotton tunic with long sleeves, "
+        "natural glowing skin in warm directional morning sunlight"
     )
 
     # Master Cinematographic Lens & Lighting Bible
@@ -47,56 +50,68 @@ class TheatricalStoryboardDirector:
     )
 
     @classmethod
-    def group_whisper_segments_into_shots(
+    def segment_script_into_4_blocks(
         cls,
         segments: List[Dict[str, Any]],
         total_duration_sec: float,
-        target_shot_duration: float = 3.4,
     ) -> List[Dict[str, Any]]:
         """
-        Groups fine-grained Whisper segments into cohesive ~3.0 - 3.8s narrative shot beats.
-        Ensures cuts align cleanly with natural sentence and clause pauses.
+        Partitions the narrative into exactly 4 cohesive informational message blocks:
+          Block 1: Hook & Mistake (~22% duration)
+          Block 2: Metabolic Mechanism (~28% duration)
+          Block 3: Kitchen Alchemy Remedy (~30% duration)
+          Block 4: Resolution & Grand Finale (~20% duration)
         """
+        # Target cut timestamps
+        t1 = round(total_duration_sec * 0.22, 2)
+        t2 = round(total_duration_sec * 0.50, 2)
+        t3 = round(total_duration_sec * 0.78, 2)
+        target_splits = [t1, t2, t3, round(total_duration_sec, 2)]
+
         if not segments:
-            # Fallback if no segments provided: divide into ~3.4s beats
-            num_shots = max(8, min(14, int(math.ceil(total_duration_sec / target_shot_duration))))
-            dur = total_duration_sec / float(num_shots)
+            # Fallback if Whisper segments missing
             return [
-                {
-                    "shot_index": i + 1,
-                    "start_sec": round(i * dur, 2),
-                    "end_sec": round(min(total_duration_sec, (i + 1) * dur), 2),
-                    "duration_sec": round(dur, 2),
-                    "sentence_text": "",
-                }
-                for i in range(num_shots)
+                {"block_index": 1, "start_sec": 0.0, "end_sec": t1, "duration_sec": t1, "text": "The Hook & Mistake", "role": "The Arresting Hook"},
+                {"block_index": 2, "start_sec": t1, "end_sec": t2, "duration_sec": round(t2 - t1, 2), "text": "Metabolic Consequence", "role": "Metabolic Mechanism"},
+                {"block_index": 3, "start_sec": t2, "end_sec": t3, "duration_sec": round(t3 - t2, 2), "text": "Kitchen Remedy", "role": "The Ancient Remedy"},
+                {"block_index": 4, "start_sec": t3, "end_sec": round(total_duration_sec, 2), "duration_sec": round(total_duration_sec - t3, 2), "text": "Resolution", "role": "Concluding Resolution"},
             ]
 
-        shot_beats: List[Dict[str, Any]] = []
+        # Group Whisper segments into the 4 target windows
+        blocks: List[Dict[str, Any]] = []
+        current_block_idx = 0
         current_texts: List[str] = []
-        current_start = float(segments[0].get("start", 0.0))
+        block_start = 0.0
 
-        for idx, seg in enumerate(segments):
+        for seg in segments:
             seg_text = seg.get("text", "").strip()
-            seg_end = float(seg.get("end", current_start + 1.0))
+            seg_end = float(seg.get("end", block_start + 1.0))
             current_texts.append(seg_text)
-            elapsed = seg_end - current_start
-            is_last = (idx == len(segments) - 1)
 
-            # Trigger shot boundary if beat reaches target duration or sentence ends
-            if elapsed >= target_shot_duration or is_last:
-                shot_dur = round(elapsed, 2)
-                shot_beats.append({
-                    "shot_index": len(shot_beats) + 1,
-                    "start_sec": round(current_start, 2),
+            # If segment passes current target split boundary and we have not finished block 3
+            if current_block_idx < 3 and seg_end >= target_splits[current_block_idx]:
+                blocks.append({
+                    "block_index": current_block_idx + 1,
+                    "start_sec": round(block_start, 2),
                     "end_sec": round(seg_end, 2),
-                    "duration_sec": shot_dur,
-                    "sentence_text": " ".join(current_texts).strip(),
+                    "duration_sec": round(seg_end - block_start, 2),
+                    "text": " ".join(current_texts).strip(),
                 })
-                current_start = seg_end
+                block_start = seg_end
                 current_texts = []
+                current_block_idx += 1
 
-        return shot_beats
+        # Final block 4 captures all remaining segments
+        dur_final = round(max(4.0, total_duration_sec - block_start), 2)
+        blocks.append({
+            "block_index": 4,
+            "start_sec": round(block_start, 2),
+            "end_sec": round(total_duration_sec, 2),
+            "duration_sec": dur_final,
+            "text": " ".join(current_texts).strip(),
+        })
+
+        return blocks
 
     @classmethod
     def generate_theatrical_storyboard(
@@ -107,381 +122,294 @@ class TheatricalStoryboardDirector:
         total_duration_sec: float = 40.0,
     ) -> List[Dict[str, Any]]:
         """
-        Generates 9-12 bespoke cinematic shots bound 1:1 to spoken sentence meaning.
-        Employs Action-Staged Keyframing to ensure natural human movement and eliminates body horror.
+        Directs 4 master cinematic message blocks for ANY Ayurvedic topic.
+        Guarantees 100% platform safety (zero nudity) and 85%+ macro food alchemy.
         """
-        # Step 1: Group speech into narrative shot beats aligned to sentence boundaries
-        shot_beats = cls.group_whisper_segments_into_shots(
+        blocks = cls.segment_script_into_4_blocks(
             segments=whisper_segments or [],
             total_duration_sec=total_duration_sec,
-            target_shot_duration=3.4,
         )
-        num_shots = len(shot_beats)
 
-        subject = topic_data.get("subject") or script_json.get("topic", "Ayurvedic Digestion")
-        key_fact = topic_data.get("key_fact", "Digestive balance requires warm botanical alchemy")
-        dosha = topic_data.get("dosha", "Digestive Agni Balance")
+        subject = topic_data.get("subject") or script_json.get("topic", "Ayurvedic Health")
+        key_fact = topic_data.get("key_fact", "Support digestive fire with warm botanical alchemy")
+        dosha = topic_data.get("dosha", "Agni Balance")
 
-        # Step 2: Try contextual LLM directorship with strict Action-Staged constraints
+        # Try Ollama contextual generation with strict 4-block laws
         try:
             from common.ollama_client import query_ollama_json
 
-            # Format the exact sentence breakdown for Ollama
-            beats_manifest = "\n".join(
-                f"Shot {b['shot_index']} ({b['start_sec']}s-{b['end_sec']}s): \"{b['sentence_text']}\""
-                for b in shot_beats
+            blocks_manifest = "\n".join(
+                f"Block {b['block_index']} ({b['start_sec']}s-{b['end_sec']}s): \"{b['text']}\""
+                for b in blocks
             )
 
-            system_prompt = f"""You are an award-winning National Geographic documentary film director and food cinematography master.
-Your mission is to direct a {num_shots}-shot cinematic film storyboard for a vertical 9:16 health documentary.
+            system_prompt = f"""You are a world-renowned documentary film director and food cinematography master.
+Your mission is to direct exactly 4 MASTER CINEMATIC BLOCKS for a 9:16 vertical health film on '{subject}'.
 
 CRITICAL DIRECTING LAWS:
-1. DIRECT SENTENCE RELEVANCE: Every visual shot MUST literally and physically illustrate the exact spoken words in that beat!
-   - When discussing mixing milk and citrus: Show the physical chemical reaction—lemon juice dripping into fresh milk, proteins curdling into curds and whey!
-   - When discussing bloating or cramps: Show the human character seated, resting a hand gently on their abdomen with an expressive concerned look.
-   - When discussing warming spices like ginger: Show artisan hands cleanly slicing golden ginger root, or stirring grated ginger into warm simmering milk with a brass spoon!
-   - When discussing drinking the remedy: Show the character bringing a warm steaming brass cup to their lips to take a soothing sip.
-2. STRICT BAN ON COSMETICS / SKINCARE:
-   - FORBIDDEN: NEVER show face creams, face masks, cosmetics, or rubbing ginger on skin. This is strictly an INGESTIBLE oral dietary drink / tea!
-3. ACTION-STAGED KEYFRAMING (AVOID BODY HORROR):
-   - Never ask the video model to transport hands 500 pixels across the screen or force a mouth open.
-   - Stage the character ALREADY IN THE ACTION in the keyframe:
-     - For sipping: Keyframe shows Maya ALREADY holding the warm cup right at her lower lip.
-     - For stirring: Keyframe shows hands ALREADY holding the brass spoon inside the pot of milk.
-     - For discomfort: Keyframe shows Maya ALREADY seated with her hand resting on her stomach.
-   - Motion prompt only animates natural micro-dynamics: lips softly parting for a gentle sip, rising steam, spoon gently stirring, soft breathing.
-   - FORBIDDEN: Chewing, biting, eating raw lemons, walking/running, lips moving without audio sync.
-   - FORBIDDEN: Brushing or touching tiny individual seeds, grains, or lentils with fingertips (diffusion models cannot track micro-objects and melt hands into mush). Instead, show macro shots of ingredients in a bowl or simmering pot.
-4. CHARACTER CONTINUITY: Use the persistent character anchor: "{cls.DEFAULT_CHARACTER_ANCHOR}".
+1. THE 4 MESSAGE BLOCKS:
+   - Block 1 (The Arresting Hook): A shocking, mesmerizing extreme macro demonstration of the dietary mistake or core food in action (e.g. curdling, boiling, raw unsoaked ingredients, liquid crashing). Must grab viewer attention in 2 seconds!
+   - Block 2 (The Metabolic Truth): Visual metabolic metaphor—smoldering golden amber coals/embers of internal digestive fire (Agni), or cloudy sluggish congealing liquid representing toxic waste (Ama).
+   - Block 3 (The Kitchen Alchemy): Traditional kitchen medicine—modestly clothed artisan hands slicing fresh medicinal roots (ginger, turmeric) on a wooden board, or stirring ground spices into a simmering pot with a brass spoon and billowing steam.
+   - Block 4 (The Concluding Resolution): Steaming golden brew pouring into an authentic hammered brass cup with rich sunbeams, followed by peaceful resolution.
+2. MINIMIZE HUMANS (<15%):
+   - Blocks 1, 2, and 3 MUST BE 100% MACRO FOOD & PHYSICAL ALCHEMY (liquids, steam, spices, embers, pots). No human bodies!
+   - Block 4 may optionally show a modest over-the-shoulder wide shot of Maya ({cls.DEFAULT_CHARACTER_ANCHOR}) holding the warm cup.
+3. ABSOLUTE NUDITY & NSFW BAN:
+   - FORBIDDEN: Nudity, toplessness, bare chests, bare stomachs, exposed skin, bedrooms, or suggestive caressing. All human characters must be fully clothed in high-collar long-sleeve linen tunics.
+4. UNIVERSAL TOPIC ADAPTATION:
+   - Tailor all visuals specifically to '{subject}' and '{key_fact}'. No skincare, no cosmetics, strictly oral culinary Ayurveda!
 
 Output valid JSON matching:
 {{
   "shots": [
     {{
       "shot_index": 1,
-      "role": "The Warning Observation",
-      "camera": "Macro Dutch Angle Dolly In",
+      "role": "The Arresting Hook",
+      "camera": "Macro Slow Push-In",
       "image_prompt": "Ultra-detailed 2D visual description...",
       "motion_prompt": "Explicit physical motion description..."
     }}
   ]
 }}"""
 
-            user_prompt = f"""Direct {num_shots} cinematic shots for this exact script:
+            user_prompt = f"""Direct 4 cinematic message blocks for:
 Subject: {subject}
-Core Truth: {key_fact}
+Core Fact: {key_fact}
 Dosha: {dosha}
 
-TIMED SPOKEN SCRIPT BEATS:
-{beats_manifest}
+THE 4 SPOKEN MESSAGE BLOCKS:
+{blocks_manifest}
 
-Return exactly {num_shots} shots in valid JSON adhering to the Action-Staged Keyframing laws."""
+Return exactly 4 shots in valid JSON."""
 
             data = query_ollama_json(prompt=user_prompt, system=system_prompt, timeout=60)
             shots_raw = data.get("shots", [])
-            if isinstance(shots_raw, list) and len(shots_raw) >= max(6, num_shots - 2):
-                logger.info(f"[+] Storyboard Director generated {len(shots_raw)} sentence-bound LLM shots.")
-                return cls._merge_and_validate_shots(shots_raw, shot_beats)
+            if isinstance(shots_raw, list) and len(shots_raw) == 4:
+                logger.info(f"[+] Storyboard Director generated 4 contextual LLM message blocks.")
+                return cls._sanitize_and_bind_blocks(shots_raw, blocks, subject, key_fact)
         except Exception as e:
-            logger.info(f"Using intelligent algorithmic sentence-bound director ({e}).")
+            logger.info(f"Using universal algorithmic 4-block director ({e}).")
 
-        # Step 3: Algorithmic Sentence-Bound Storyboard Generation (Ironclad, 100% context-relevant)
-        return cls._generate_algorithmic_sentence_storyboard(
-            shot_beats=shot_beats,
-            subject=subject,
-            key_fact=key_fact,
-        )
+        # Algorithmic Universal 4-Block Storyboard (100% Contextual, Safe & Visceral)
+        return cls._generate_algorithmic_universal_blocks(blocks, subject, key_fact)
 
     @classmethod
-    def _merge_and_validate_shots(
+    def _sanitize_and_bind_blocks(
         cls,
         shots_raw: List[Dict[str, Any]],
-        shot_beats: List[Dict[str, Any]],
+        blocks: List[Dict[str, Any]],
+        subject: str,
+        key_fact: str,
     ) -> List[Dict[str, Any]]:
-        """Merges LLM shots with exact Whisper timing and sanitizes against cosmetic/horror prompts."""
-        merged: List[Dict[str, Any]] = []
-        for i, beat in enumerate(shot_beats):
+        """Validates, sanitizes against nudity/horror, and binds the 4 shots to exact timing."""
+        sanitized: List[Dict[str, Any]] = []
+
+        for i, b in enumerate(blocks):
             raw = shots_raw[i] if i < len(shots_raw) else {}
             img_p = raw.get("image_prompt", "")
             mot_p = raw.get("motion_prompt", "")
 
-            # Sanitize against cosmetic face-cream hallucinations
-            if any(w in img_p.lower() for w in ["face cream", "face mask", "cream in face", "skin cream", "lotion"]):
-                logger.warning(f"Sanitizing cosmetic hallucination in Shot {i+1} -> Converted to spiced milk preparation.")
-                img_p = (
-                    f"Close-up shot of artisan hands using a vintage brass spoon to stir freshly grated golden ginger root and cinnamon into a simmering pot of warm milk, {cls.CINEMATIC_STYLE_BIBLE}"
-                )
-                mot_p = (
-                    "Brass spoon stirring the warm spiced milk in slow smooth circular motion, golden liquid swirling, fragrant steam billowing softly"
-                )
+            # Sanitize any NSFW / nudity / body caressing keywords
+            if cls._is_nsfw_or_body_caress(img_p) or cls._is_nsfw_or_body_caress(mot_p):
+                logger.warning(f"Sanitizing body/NSFW reference in Block {i+1} -> Converted to macro food alchemy.")
+                img_p, mot_p = cls._get_safe_block_alchemy(i + 1, subject, key_fact, b["text"])
 
-            # Sanitize against eating lemons raw
-            if "eating lemon" in img_p.lower() or "eating lemon" in mot_p.lower():
-                logger.warning(f"Sanitizing eating-lemon horror in Shot {i+1} -> Converted to macro curdling reaction.")
-                img_p = (
-                    f"Extreme macro shot of pure whole milk in a glass vessel, fresh lemon juice drops falling into the liquid, proteins curdling and clumping into curds and whey, {cls.CINEMATIC_STYLE_BIBLE}"
-                )
-                mot_p = (
-                    "Dynamic slow-motion liquid droplets falling, milk curdling and separating into curds and whey, fluid surface ripples"
-                )
+            # Ensure minimum length & quality
+            if len(img_p) < 30:
+                img_p, mot_p = cls._get_safe_block_alchemy(i + 1, subject, key_fact, b["text"])
 
-            # Sanitize against fine-motor fingertip actions on micro-seeds/lentils (causes diffusion smudge horror)
-            if any(w in img_p.lower() or w in mot_p.lower() for w in ["finger lightly brushes", "brushes across", "stroking lentil", "touching lentil", "finger on lentil"]):
-                logger.warning(f"Sanitizing micro-lentil fingertip action in Shot {i+1} -> Converted to simmering lentil pot.")
-                img_p = (
-                    f"Close-up high-angle shot of dry split lentils in a ceramic bowl on a rustic table, contrasted with golden lentils simmering with fresh ginger in an authentic earthen pot, {cls.CINEMATIC_STYLE_BIBLE}"
-                )
-                mot_p = (
-                    "Fragrant steam billowing upwards from the simmering lentil pot, delicate surface bubbling, slow smooth cinematic camera push-in dolly shot"
-                )
-
-            merged.append({
-                "shot_index": beat["shot_index"],
-                "role": raw.get("role", f"Narrative Beat {i+1}"),
+            sanitized.append({
+                "shot_index": i + 1,
+                "role": raw.get("role", f"Block {i+1}"),
                 "camera": raw.get("camera", "Cinematic Macro Push-In"),
-                "image_prompt": img_p or cls._build_contextual_fallback_image_prompt(beat["sentence_text"]),
-                "motion_prompt": mot_p or cls._build_contextual_fallback_motion_prompt(beat["sentence_text"]),
-                "start_sec": beat["start_sec"],
-                "end_sec": beat["end_sec"],
-                "duration_sec": beat["duration_sec"],
-                "sentence_text": beat["sentence_text"],
+                "image_prompt": img_p,
+                "motion_prompt": mot_p,
+                "start_sec": b["start_sec"],
+                "end_sec": b["end_sec"],
+                "duration_sec": b["duration_sec"],
+                "sentence_text": b["text"],
             })
-        return merged
+
+        return sanitized
 
     @classmethod
-    def _generate_algorithmic_sentence_storyboard(
+    def _generate_algorithmic_universal_blocks(
         cls,
-        shot_beats: List[Dict[str, Any]],
+        blocks: List[Dict[str, Any]],
         subject: str,
         key_fact: str,
     ) -> List[Dict[str, Any]]:
         """
-        Dynamically analyzes the text of each spoken sentence to generate 100% context-aligned
-        Action-Staged shots with zero body horror and zero generic mismatches.
+        Universal algorithmic generator for ANY Ayurvedic topic:
+        Extracts core ingredients from the subject and generates 4 stunning macro food science shots.
         """
+        roles = [
+            "The Arresting Hook",
+            "Metabolic Agni Truth",
+            "Ancient Kitchen Alchemy",
+            "Concluding Resolution & Drink",
+        ]
+        cameras = [
+            "Extreme Macro Dutch Angle Dolly In",
+            "Macro Slow Horizontal Tracking Pan",
+            "High-Angle Circular Arc Tracking",
+            "Hero Macro Tilt Dolly In",
+        ]
+
         shots: List[Dict[str, Any]] = []
-
-        for beat in shot_beats:
-            s_text = beat["sentence_text"].lower()
-            idx = beat["shot_index"]
-
-            img_p, mot_p, role, cam = cls._classify_sentence_to_action(s_text, idx, len(shot_beats))
-
+        for i, b in enumerate(blocks):
+            idx = i + 1
+            img_p, mot_p = cls._get_safe_block_alchemy(idx, subject, key_fact, b["text"])
             shots.append({
                 "shot_index": idx,
-                "role": role,
-                "camera": cam,
+                "role": roles[i],
+                "camera": cameras[i],
                 "image_prompt": img_p,
                 "motion_prompt": mot_p,
-                "start_sec": beat["start_sec"],
-                "end_sec": beat["end_sec"],
-                "duration_sec": beat["duration_sec"],
-                "sentence_text": beat["sentence_text"],
+                "start_sec": b["start_sec"],
+                "end_sec": b["end_sec"],
+                "duration_sec": b["duration_sec"],
+                "sentence_text": b["text"],
             })
         return shots
 
     @classmethod
-    def _classify_sentence_to_action(
-        cls,
-        text: str,
-        shot_idx: int,
-        total_shots: int,
-    ) -> Tuple[str, str, str, str]:
-        """
-        Translates a spoken sentence into an Action-Staged Keyframe prompt and safe kinetic motion prompt.
-        """
-        char = cls.DEFAULT_CHARACTER_ANCHOR
-        style = cls.CINEMATIC_STYLE_BIBLE
+    def _is_nsfw_or_body_caress(cls, text: str) -> bool:
+        """Returns True if text contains prohibited body or nudity terms."""
+        t_low = text.lower()
+        bad_words = [
+            "abdomen", "caress", "stomach", "belly", "bare", "nude", "nudity", "topless",
+            "breast", "chest", "navel", "waist", "skin cream", "face cream", "face mask",
+            "rubbing", "touching body", "bedroom", "undies", "underwear", "eating lemon"
+        ]
+        return any(w in t_low for w in bad_words)
 
-        # Category 5: Vitality, Energy, Radiance, CTA (The Healthy Conclusion)
-        if any(w in text for w in ["energized", "balanced all day", "vitality", "follow for daily", "heal your body", "light, balanced"]):
-            role = "Radiant Vitality Reaction"
-            cam = "Medium Portrait Dolly In"
+    @classmethod
+    def _get_safe_block_alchemy(
+        cls,
+        block_idx: int,
+        subject: str,
+        key_fact: str,
+        block_text: str,
+    ) -> Tuple[str, str]:
+        """
+        Synthesizes a universal, photorealistic macro food alchemy prompt tailored to ANY Ayurvedic topic.
+        """
+        style = cls.CINEMATIC_STYLE_BIBLE
+        char = cls.DEFAULT_CHARACTER_ANCHOR
+        subj_clean = subject.strip()
+
+        # BLOCK 1: The Arresting Hook (The Mistake in Action)
+        if block_idx == 1:
+            # Detect primary subject matter dynamically
+            s_low = f"{subject} {block_text}".lower()
+            if "honey" in s_low:
+                img = (
+                    f"Extreme close-up macro shot of raw amber honey being overheated in a hot iron pan, "
+                    f"honey bubbling aggressively, turning dark amber with fine wisps of thermal vapor in dramatic morning sunbeams, {style}"
+                )
+                mot = "Viscous bubbling amber liquid, thermal steam rising gracefully, slow cinematic camera push-in dolly shot"
+            elif "curd" in s_low or "yogurt" in s_low:
+                img = (
+                    f"Extreme macro shot of thick cultured whole milk curd on a dark slate board, cold condensation beads shimmering, "
+                    f"artisan wooden spoon lifting a heavy dense spoonful in golden directional morning light, {style}"
+                )
+                mot = "Slow cinematic macro camera glide across the glistening textured curd surface, soft morning light refraction"
+            elif "milk" in s_low and any(w in s_low for w in ["citrus", "lemon", "sour", "acid", "curdle"]):
+                img = (
+                    f"Extreme close-up macro shot of fresh whole milk inside a clear glass vessel, fresh lemon juice droplets plunging in, "
+                    f"milk proteins visibly coagulating and separating into textured curds and clear watery whey in morning sunlight, {style}"
+                )
+                mot = "Dynamic slow-motion liquid droplets plunging into milk, milk curds clumping and separating on the surface, gentle fluid ripples"
+            elif "water" in s_low and any(w in s_low for w in ["ice", "cold", "chill"]):
+                img = (
+                    f"Extreme macro shot of heavy translucent ice cubes splashing violently into a tall glass of ice water, "
+                    f"crystal clear water droplets flying in midair, frosted glass condensation in golden morning sunbeams, {style}"
+                )
+                mot = "Dramatic slow-motion liquid splash, ice cubes bobbing dynamically, water droplets flying and rippling, slow camera dolly in"
+            elif any(w in s_low for w in ["lentil", "bean", "dal"]):
+                img = (
+                    f"Extreme close-up macro shot of dry, unsoaked rock-hard split lentils clattering into a dark stone mortar on a teak table, "
+                    f"fine botanical dust puffing softly into dramatic morning sunbeams, {style}"
+                )
+                mot = "Hard dry lentils settling in the mortar, fine botanical dust floating in sunbeams, slow smooth macro camera push-in"
+            elif "ghee" in s_low:
+                img = (
+                    f"Extreme macro shot of pure clarified golden liquid ghee swirling in a warm vintage brass spoon, "
+                    f"golden translucency glowing warmly in directional morning sunlight, {style}"
+                )
+                mot = "Golden liquid ghee rippling smoothly inside the brass spoon, warm sunlight shifting, slow cinematic camera glide"
+            else:
+                # Universal Food Science Hook
+                img = (
+                    f"Extreme macro hero shot of authentic raw ingredients for {subj_clean} arranged on a rustic dark teak wood surface, "
+                    f"fresh botanical textures glowing in directional morning sunbeams, dramatic shallow depth of field, {style}"
+                )
+                mot = "Smooth cinematic camera push-in dolly shot, warm morning sunbeams shifting gently across the surface, vivid depth"
+            return img, mot
+
+        # BLOCK 2: The Metabolic Truth (Agni & Ama Chemistry)
+        if block_idx == 2:
             img = (
-                f"Cinematic portrait of {char} looking towards a sunlit window with a warm, genuine radiant smile, holding the warm brass cup with both hands on the table, "
-                f"golden morning sunbeams illuminating her face with healthy glowing vitality, {style}"
+                f"Macro cinematic shot of glowing golden amber embers and wood coals of an ancient hearth fire, "
+                f"smoldering with deep internal warmth, soft smoke and floating sparks in a moody dark atmospheric kitchen, {style}"
             )
             mot = (
-                "Soft natural eye blink, warm radiant smile broadening gently, living breathing presence, morning sunbeams shifting softly, peaceful joy"
+                "Deep golden coals pulsing with gentle thermal warmth, delicate smoke rising softly, slow horizontal camera tracking pan"
             )
-            return img, mot, role, cam
+            return img, mot
 
-        # Category 4: The Remedy Drink, Pouring, Sipping (The Relief Sip)
-        if any(w in text for w in ["drink", "sip", "tea", "cup", "mug", "remedy", "fix", "solution", "soothing", "kindle"]):
-            if shot_idx >= total_shots - 2 or any(w in text for w in ["drink", "sip", "lips"]):
-                # The Relief Sip: staged right at the lips
-                role = "The Relief Sip"
-                cam = "3/4 Profile Close-Up"
-                img = (
-                    f"Cinematic 3/4 profile shot of {char} bringing an authentic warm hammered brass cup to her lips, cup touching lower lip, "
-                    f"holding the warm cup with both hands, aromatic herbal steam softly curling past her cheek in warm morning light, {style}"
-                )
-                mot = (
-                    "Gentle natural sip, lips subtly parting, aromatic steam billowing continuously from the cup, soft relaxed breathing, peaceful relief"
-                )
-                return img, mot, role, cam
-            else:
-                # The Hot Brass Pour
-                role = "The Hot Brass Pour"
-                cam = "Macro Hero Tilt"
-                img = (
-                    f"Hero macro close-up of steaming golden spiced milk pouring gracefully from a copper kettle into an authentic hammered brass cup, "
-                    f"rich liquid swirling with golden turmeric and ginger froth, dramatic sunbeams, {style}"
-                )
-                mot = (
-                    "Continuous steaming spiced milk pouring into the brass cup, rich fluid swirling ripples on surface, billowing rising steam"
-                )
-                return img, mot, role, cam
+        # BLOCK 3: The Ancient Kitchen Remedy (Botanical Alchemy)
+        if block_idx == 3:
+            img = (
+                f"Close-up high-angle shot of artisan hands in high-collar linen sleeves using a vintage hammered brass spoon to gently stir "
+                f"freshly sliced golden ginger, green cardamom pods, and whole cumin seeds into a simmering earthen pot of warm herbal decoction, "
+                f"golden ripples swirling through the liquid, billowing fragrant steam in morning sunbeams, {style}"
+            )
+            mot = (
+                "Brass spoon smoothly stirring warm spiced liquid in slow circular motion, golden liquid rippling, fragrant steam rising continuously"
+            )
+            return img, mot
 
-        # Category 3: Warming Spices, Ginger, Cardamom, Simmering Preparation
-        if any(w in text for w in ["ginger", "spice", "warm", "cardamom", "cinnamon", "boil", "simmer", "stir", "pot"]):
-            if any(w in text for w in ["slice", "cut", "fresh ginger", "root"]):
-                role = "Artisan Ginger Preparation"
-                cam = "Macro Side Track"
-                img = (
-                    f"Macro close-up shot of artisan hands cleanly slicing fresh raw knobby ginger root with a sharp chef knife on a teak wood cutting board, "
-                    f"fragrant fine droplets of spicy ginger juice catching warm morning sunbeams, {style}"
-                )
-                mot = (
-                    "Clean decisive knife stroke slicing through fibrous golden ginger, fragrant micro-zest spraying, smooth cinematic tracking motion"
-                )
-                return img, mot, role, cam
-            else:
-                role = "Spiced Milk Alchemy"
-                cam = "High-Angle Circular Arc"
-                img = (
-                    f"Close-up high-angle shot of artisan hands using a vintage hammered brass spoon to gently stir freshly grated golden ginger and green cardamom pods into a simmering pot of warm whole milk, "
-                    f"golden spice ripples swirling through the creamy liquid, billowing aromatic steam, {style}"
-                )
-                mot = (
-                    "Brass spoon smoothly stirring warm spiced milk in slow circular motion, golden liquid rippling and swirling, fragrant steam rising continuously"
-                )
-                return img, mot, role, cam
-
-        # Category 1: Milk, Citrus, Curdling (The Chemical Incompatibility)
-        if any(w in text for w in ["curdle", "curdling", "citrus", "lemon", "sour", "acid"]):
-            if any(w in text for w in ["milk", "dairy"]):
-                role = "Macro Curdling Reaction"
-                cam = "Extreme Macro Dolly In"
-                img = (
-                    f"Extreme close-up macro shot of pure whole milk inside a clear glass vessel, fresh yellow lemon juice drops falling into the liquid, "
-                    f"milk proteins visibly coagulating and separating into textured curds and clear watery whey, dramatic directional morning sunlight, {style}"
-                )
-                mot = (
-                    "Dynamic slow-motion liquid droplets plunging into milk, milk curds visibly clumping and separating on the surface, "
-                    "gentle fluid ripples, continuous slow cinematic camera push-in"
-                )
-                return img, mot, role, cam
-            else:
-                role = "Citrus Acid Macro"
-                cam = "Macro Slow Pan"
-                img = (
-                    f"Extreme macro shot of a fresh ripe yellow lemon sliced open on a dark teak wood surface, glistening translucent pulp vesicles bursting with juice in golden morning sunbeams, {style}"
-                )
-                mot = (
-                    "Slow cinematic macro camera glide across the citrus surface, sunlight refracting through juice droplets, delicate atmospheric dust motes"
-                )
-                return img, mot, role, cam
-
-        # Category 2: Bloating, Fermentation, Stomach Cramps, Toxicity
-        if any(w in text for w in ["bloat", "cramp", "ferment", "toxin", "stomach", "gut", "fatigue", "digestive fire", "agni", "mistake"]):
-            if shot_idx == 1:
-                # Opening hook: character observing breakfast table with curiosity
-                role = "The Hook Observation"
-                cam = "Over-The-Shoulder Shallow Focus"
-                img = (
-                    f"Cinematic over-the-shoulder shot looking past {char} seated at a rustic wooden dining table in morning window light, "
-                    f"looking down with thoughtful curiosity at a glass of milk and fresh citrus fruits on the table, {style}"
-                )
-                mot = (
-                    "Subtle natural breathing movement in shoulder, gentle head tilt, warm morning breeze rustling linen curtains, cinematic shallow focus"
-                )
-                return img, mot, role, cam
-            else:
-                # Digestive discomfort: action-staged seated pose with hand on abdomen
-                role = "The Digestive Discomfort"
-                cam = "Medium Close-Up Subtle Dolly In"
-                img = (
-                    f"Cinematic medium close-up of {char} seated at a rustic table, resting one hand gently on her abdomen with an expressive concerned look, "
-                    f"warm moody morning window light casting soft shadows, {style}"
-                )
-                mot = (
-                    "Subtle shallow breathing, hand resting gently on abdomen, subtle downward concerned glance, organic living presence, slow camera push"
-                )
-                return img, mot, role, cam
-
-        # Category 5: Vitality, Energy, Radiance, CTA (The Healthy Conclusion)
-        role = "Radiant Vitality Reaction"
-        cam = "Medium Portrait Dolly In"
+        # BLOCK 4: The Concluding Resolution & Drink
         img = (
-            f"Cinematic portrait of {char} looking towards a sunlit window with a warm, genuine radiant smile, holding the warm brass cup with both hands on the table, "
-            f"golden morning sunbeams illuminating her face with healthy glowing vitality, {style}"
+            f"Hero close-up macro shot of steaming amber-golden spiced Ayurvedic elixir pouring gracefully from a copper kettle into an authentic hammered brass cup, "
+            f"rich liquid swirling with golden froth, delicate steam billowing into bright directional morning sunbeams on a rustic marble table, {style}"
         )
         mot = (
-            "Soft natural eye blink, warm radiant smile broadening gently, living breathing presence, morning sunbeams shifting softly, peaceful joy"
+            "Continuous steaming spiced herbal elixir pouring into the brass cup, rich fluid swirling ripples on surface, billowing rising steam, slow majestic dolly in"
         )
-        return img, mot, role, cam
-
-    @classmethod
-    def _build_contextual_fallback_image_prompt(cls, text: str) -> str:
-        img, _, _, _ = cls._classify_sentence_to_action(text.lower(), 1, 10)
-        return img
-
-    @classmethod
-    def _build_contextual_fallback_motion_prompt(cls, text: str) -> str:
-        _, mot, _, _ = cls._classify_sentence_to_action(text.lower(), 1, 10)
-        return mot
-
-    @classmethod
-    def _normalize_and_time_shots(
-        cls,
-        shots: List[Dict[str, Any]],
-        total_duration_sec: float,
-        target_count: int,
-    ) -> List[Dict[str, Any]]:
-        """Utility to re-time shots evenly if fine-grained Whisper segments were not available."""
-        out = []
-        n = max(1, len(shots))
-        dur_per = total_duration_sec / float(n)
-        for i, s in enumerate(shots):
-            s_copy = dict(s)
-            s_copy["shot_index"] = i + 1
-            s_copy["start_sec"] = round(i * dur_per, 2)
-            s_copy["end_sec"] = round(min(total_duration_sec, (i + 1) * dur_per), 2)
-            s_copy["duration_sec"] = round(s_copy["end_sec"] - s_copy["start_sec"], 2)
-            out.append(s_copy)
-        return out
+        return img, mot
 
 
-def test_storyboard() -> bool:
-    """Verifies that the sentence-bound storyboard director generates Action-Staged shots."""
+def test_universal_4_blocks():
+    """Verifies that the Universal 4-Block Director generates exactly 4 safe macro shots for any topic."""
     director = TheatricalStoryboardDirector()
-    dummy_segments = [
-        {"start": 0.0, "end": 3.6, "text": "When you mix milk with sour citrus fruits, they curdle instantly in your stomach."},
-        {"start": 3.6, "end": 7.2, "text": "This creates toxic fermented sludge that blocks nutrient absorption and causes severe bloating."},
-        {"start": 7.2, "end": 10.8, "text": "In ancient holistic science, cooling dairy clashes with acidic heating fruits, extinguishing your digestive fire."},
-        {"start": 10.8, "end": 14.5, "text": "Instead, always wait at least two hours between dairy and citrus."},
-        {"start": 14.5, "end": 18.2, "text": "And always add warming spices like fresh ginger to help digest the combination safely."},
-        {"start": 18.2, "end": 22.0, "text": "Drink warm spiced milk to kindle digestive fire and feel light, energized, and balanced all day."},
+
+    test_topics = [
+        {"subject": "Heating Raw Honey Above 40C", "key_fact": "Heat denatures honey enzymes into toxic Ama glue"},
+        {"subject": "Curd and Yogurt at Night", "key_fact": "Heavy curd clogs micro-circulatory channels and creates mucus"},
+        {"subject": "Drinking Iced Water With Meals", "key_fact": "Cold water extinguishes digestive fire and solidifies fats"},
     ]
 
-    shots = director.generate_theatrical_storyboard(
-        script_json={"topic": "Milk and Citrus Incompatibility"},
-        topic_data={"subject": "Milk and Citrus Incompatibility", "key_fact": "Mixing milk with citrus causes curdling"},
-        whisper_segments=dummy_segments,
-        total_duration_sec=22.0,
-    )
+    for t in test_topics:
+        shots = director.generate_theatrical_storyboard(
+            script_json={"topic": t["subject"]},
+            topic_data=t,
+            whisper_segments=[],
+            total_duration_sec=40.0,
+        )
+        assert len(shots) == 4, f"Expected 4 shots, got {len(shots)}"
+        print(f"\n[+] Topic '{t['subject']}' generated {len(shots)} blocks:")
+        for s in shots:
+            print(f"  Block {s['shot_index']} ({s['start_sec']}s-{s['end_sec']}s) [{s['role']}]: {s['image_prompt'][:70]}...")
+            assert not director._is_nsfw_or_body_caress(s["image_prompt"]), "Prohibited body/caress term found!"
+            assert not director._is_nsfw_or_body_caress(s["motion_prompt"]), "Prohibited motion term found!"
 
-    print(f"[+] Storyboard test generated {len(shots)} shots:")
-    for s in shots:
-        print(f"  Shot {s['shot_index']} ({s['start_sec']}s-{s['end_sec']}s) [{s['role']}]: {s['image_prompt'][:65]}...")
-        # Check that no cosmetic face creams exist
-        assert "face cream" not in s["image_prompt"].lower(), "Cosmetic face cream found!"
-        assert "eating lemon" not in s["image_prompt"].lower(), "Eating lemon horror found!"
-
-    print("[+] All storyboard assertions passed cleanly!")
+    print("\n[+] All universal 4-block assertions passed cleanly!")
     return True
 
 
 if __name__ == "__main__":
-    test_storyboard()
+    test_universal_4_blocks()

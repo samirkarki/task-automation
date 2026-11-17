@@ -399,33 +399,26 @@ def generate_video_assets(
                 "durationFrames": frames_per,
             })
 
-    # 7. Construct Educational Infographic Cards with Complete, Untruncated Text
+    # 7. Concluding Ayurvedic Golden Rule Card (Grand Finale Climax Hook)
+    # The warning card is completely removed from the top during the main video (0s - ~33s)
+    # to keep the video window full-screen, clean, and spacious.
+    # It renders exclusively in the final concluding scene (~last 7 seconds) as the climax takeaway.
     cards_data = script_json.get("cards", {})
-    warning_title = cards_data.get("warning_title") or "The Fatal Mistake: Iced Drinks With Meals"
-    warning_sub = cards_data.get("warning_subtitle") or "Ice-cold water extinguishes digestive fire, congealing fats and fermenting toxic waste in the gut."
+    remedy_title = cards_data.get("remedy_title") or f"Golden Rule: {selected_topic.get('subject', 'Ayurvedic Gut Health')}"
+    remedy_sub = cards_data.get("remedy_subtitle") or selected_topic.get("key_fact", "Support internal digestive fire with warm digestive herbs and mindful food timings.")
 
-    remedy_title = cards_data.get("remedy_title") or "The Ancient Fix: Sip Warm Liquids"
-    remedy_sub = cards_data.get("remedy_subtitle") or "Drink warm water or ginger tea with meals to stimulate digestive enzymes and eliminate bloating."
-
-    card_duration_frames = int(6.5 * fps)
-    warning_start_frame = int(max(6.0, duration_sec * 0.18) * fps)
-    remedy_start_frame = int(max(warning_start_frame / fps + 8.0, duration_sec * 0.62) * fps)
+    finale_card_sec = min(7.5, max(5.0, duration_sec * 0.18))
+    finale_start_frame = int((duration_sec - finale_card_sec) * fps)
+    finale_duration_frames = int(finale_card_sec * fps)
 
     cards = [
         {
-            "type": "warning",
-            "title": warning_title,
-            "subtitle": warning_sub,
-            "startFrame": warning_start_frame,
-            "durationFrames": card_duration_frames,
-        },
-        {
             "type": "remedy",
-            "title": remedy_title,
-            "subtitle": remedy_sub,
-            "startFrame": remedy_start_frame,
-            "durationFrames": card_duration_frames,
-        },
+            "title": remedy_title[:45],
+            "subtitle": remedy_sub[:120],
+            "startFrame": finale_start_frame,
+            "durationFrames": finale_duration_frames,
+        }
     ]
 
     return {

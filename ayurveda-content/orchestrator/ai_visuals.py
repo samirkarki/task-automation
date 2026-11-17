@@ -35,6 +35,13 @@ logger = logging.getLogger("ayurveda.ai_visuals")
 # Default ComfyUI URL as requested: http://0.0.0.0:8188/ unless changed from env
 COMFYUI_URL = os.getenv("COMFYUI_URL", "http://0.0.0.0:8188/").strip().rstrip("/")
 
+# Mandatory Platform Safety Negative Tokens (Strictly applied to ALL generation passes)
+NSFW_NEGATIVE_PROMPT = (
+    "nsfw, nude, nudity, topless, bare breasts, bare chest, cleavage, naked, unclothed, "
+    "erotic, sexual, suggestive, underwear, lingerie, bikini, bare stomach, bare abdomen, navel, "
+    "exposed skin, bedroom, seductive, sensual, touching body, caressing"
+)
+
 # -----------------------------------------------------------------------------
 # Persistent HTTP Session with Connection Pooling & Transient Error Retries
 # -----------------------------------------------------------------------------
@@ -884,10 +891,11 @@ def generate_comfyui_image(
         seed = random.randint(1, 1_000_000_000)
         client_id = str(uuid.uuid4())
 
-        neg_text = (
+        base_neg = (
             negative_prompt
             or "dark, underexposed, gloomy, black background, pitch black, obsidian, muddy, abstract, cellular, microscopic, internal organ, medical render, slime, sludge, cartoon, illustration, drawing, painting, 3d render, anime, deformed, bad anatomy, blurry, flicker, static, text, watermark, logo, lowres, noise"
         )
+        neg_text = f"{NSFW_NEGATIVE_PROMPT}, {base_neg}"
 
         prompt_graph = {
             "4": {
@@ -1278,10 +1286,13 @@ def generate_theatrical_i2v_clip(
 
     motion_prompt = construct_kinetic_motion_prompt(prompt_text)
     motion_neg = (
-        negative_prompt
-        or "eating, chewing, open mouth, teeth, tongue, touching face, rubbing cream, face mask, skincare, "
-        "walking, running, legs, distorted limbs, extra fingers, deformed hands, morphing face, body horror, mutation, "
-        "ugly, jerky motion, slideshow, static, still frame, motionless, paused video, still photo, frozen, stationary, blurry, watermark"
+        f"{NSFW_NEGATIVE_PROMPT}, "
+        + (
+            negative_prompt
+            or "eating, chewing, open mouth, teeth, tongue, touching face, rubbing cream, face mask, skincare, "
+            "walking, running, legs, distorted limbs, extra fingers, deformed hands, morphing face, body horror, mutation, "
+            "ugly, jerky motion, slideshow, static, still frame, motionless, paused video, still photo, frozen, stationary, blurry, watermark"
+        )
     )
 
     # Frame count for LTX-Video must adhere to 8n + 1 (e.g. 65, 81, 97, 121)
