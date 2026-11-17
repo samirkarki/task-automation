@@ -35,7 +35,9 @@ class MotionGuard:
     """
 
     # Minimum mean pixel variance threshold (0-255 scale) between frames spaced 1.0s apart
-    MIN_MOTION_THRESHOLD = 3.5
+    # 0.8 reliably catches static PNGs / frozen frame fallbacks (delta < 0.2)
+    # while preserving subtle, elegant cinematic camera push-ins and natural breathing (delta 1.0 - 3.5).
+    MIN_MOTION_THRESHOLD = 0.8
 
     @classmethod
     def verify_video_motion(

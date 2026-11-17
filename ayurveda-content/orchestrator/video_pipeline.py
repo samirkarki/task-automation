@@ -129,7 +129,7 @@ def generate_video_assets(
     output_dir: Optional[Path] = None,
     use_mock_on_offline: bool = True,
     image_strength: float = 0.81,
-    cfg: float = 3.2,
+    cfg: float = 2.6,
 ) -> Dict[str, Any]:
     """Generates script, audio, subtitles, and stock videos for a topic."""
     current_dir = Path(__file__).resolve().parent

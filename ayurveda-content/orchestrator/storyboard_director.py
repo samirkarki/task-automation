@@ -151,6 +151,7 @@ CRITICAL DIRECTING LAWS:
      - For discomfort: Keyframe shows Maya ALREADY seated with her hand resting on her stomach.
    - Motion prompt only animates natural micro-dynamics: lips softly parting for a gentle sip, rising steam, spoon gently stirring, soft breathing.
    - FORBIDDEN: Chewing, biting, eating raw lemons, walking/running, lips moving without audio sync.
+   - FORBIDDEN: Brushing or touching tiny individual seeds, grains, or lentils with fingertips (diffusion models cannot track micro-objects and melt hands into mush). Instead, show macro shots of ingredients in a bowl or simmering pot.
 4. CHARACTER CONTINUITY: Use the persistent character anchor: "{cls.DEFAULT_CHARACTER_ANCHOR}".
 
 Output valid JSON matching:
@@ -222,6 +223,16 @@ Return exactly {num_shots} shots in valid JSON adhering to the Action-Staged Key
                 )
                 mot_p = (
                     "Dynamic slow-motion liquid droplets falling, milk curdling and separating into curds and whey, fluid surface ripples"
+                )
+
+            # Sanitize against fine-motor fingertip actions on micro-seeds/lentils (causes diffusion smudge horror)
+            if any(w in img_p.lower() or w in mot_p.lower() for w in ["finger lightly brushes", "brushes across", "stroking lentil", "touching lentil", "finger on lentil"]):
+                logger.warning(f"Sanitizing micro-lentil fingertip action in Shot {i+1} -> Converted to simmering lentil pot.")
+                img_p = (
+                    f"Close-up high-angle shot of dry split lentils in a ceramic bowl on a rustic table, contrasted with golden lentils simmering with fresh ginger in an authentic earthen pot, {cls.CINEMATIC_STYLE_BIBLE}"
+                )
+                mot_p = (
+                    "Fragrant steam billowing upwards from the simmering lentil pot, delicate surface bubbling, slow smooth cinematic camera push-in dolly shot"
                 )
 
             merged.append({

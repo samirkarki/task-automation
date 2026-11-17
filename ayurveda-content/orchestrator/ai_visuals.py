@@ -1217,7 +1217,7 @@ def generate_theatrical_i2v_clip(
     width: int = 768,
     height: int = 1024,
     image_strength: float = 0.81,
-    cfg: float = 3.2,
+    cfg: float = 2.6,
     steps: int = 25,
     timeout_sec: int = 600,
 ) -> Optional[Path]:
@@ -1772,7 +1772,7 @@ def generate_scene_visuals(
     num_frames: int = 81,
     frame_rate: int = 24,
     image_strength: float = 0.81,
-    cfg: float = 3.2,
+    cfg: float = 2.6,
     scene_prompts_override: Optional[List[str]] = None,
     storyboard_shots: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
@@ -1934,10 +1934,11 @@ def generate_scene_visuals(
                     is_moving, score, reason = MotionGuard.verify_video_motion(target_video)
                     if not is_moving:
                         logger.warning(
-                            f"[-] MotionGuard: Shot {idx} [{shot_role}] has insufficient motion (Score {score:.2f}: {reason}). "
-                            "Re-sampling once with elevated kinetic directorship and boost..."
+                            f"[-] MotionGuard: Shot {idx} [{shot_role}] is genuinely frozen (Score {score:.2f}: {reason}). "
+                            "Re-sampling once with smooth cinematic camera dolly motion..."
                         )
-                        elevated_motion = f"{motion_prompt}, highly dynamic fluid motion, turbulent physical action, vivid camera movement"
+                        # Use camera motion to create full-frame dynamic motion WITHOUT melting human subjects or physical objects
+                        elevated_motion = f"{motion_prompt}, continuous smooth cinematic camera push-in dolly shot, subtle atmospheric lighting shift"
                         generate_theatrical_i2v_clip(
                             prompt_text=elevated_motion,
                             output_path=target_video,
@@ -1946,8 +1947,8 @@ def generate_scene_visuals(
                             frame_rate=frame_rate,
                             width=768,
                             height=1024,
-                            image_strength=min(0.85, image_strength + 0.08),
-                            cfg=cfg + 0.5,
+                            image_strength=image_strength,
+                            cfg=min(2.8, cfg),
                         )
                 except Exception as mg_err:
                     logger.debug(f"MotionGuard check skipped: {mg_err}")
