@@ -1761,18 +1761,20 @@ def generate_scene_visuals(
     output_dir: Path,
     queries: Optional[List[str]] = None,
     script_json: Optional[Dict[str, Any]] = None,
-    max_frames: int = 6,
-    num_frames: int = 121,
+    max_frames: int = 12,
+    num_frames: int = 81,
     frame_rate: int = 24,
     image_strength: float = 0.70,
     cfg: float = 3.5,
     scene_prompts_override: Optional[List[str]] = None,
+    storyboard_shots: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """
     Generates theatrical AI visual frames or video clips for the video scenes via ComfyUI.
     Uses two-phase batching to eliminate GPU model thrashing over PCIe:
       - Batch Phase 1: Pre-generates all master keyframes (SDXL / RealVisXL loaded ONCE).
       - Batch Phase 2: Synthesizes all 24fps DiT video clips (LTX-Video loaded ONCE).
+    Includes MotionGuard automated optical-flow quality control to prevent frozen clips.
     Returns list of saved visual file paths (.mp4 or .jpg/.png).
     """
     if not is_comfyui_available():
@@ -1781,9 +1783,21 @@ def generate_scene_visuals(
     output_dir.mkdir(parents=True, exist_ok=True)
     visual_paths: List[str] = []
 
-    # 1. Determine prompts: prefer pre-computed prompts, then contextual LLM prompts from full narrative
+    # 1. Determine prompts: prefer storyboard_shots, then pre-computed prompts, then contextual LLM
     scene_prompts: List[str] = []
-    if scene_prompts_override and len(scene_prompts_override) > 0:
+    shot_motion_prompts: Dict[int, str] = {}
+    shot_roles: Dict[int, str] = {}
+
+    if storyboard_shots and len(storyboard_shots) > 0:
+        for idx, shot in enumerate(storyboard_shots[:max_frames], 1):
+            img_p = shot.get("image_prompt") or shot.get("prompt", "")
+            mot_p = shot.get("motion_prompt") or img_p
+            role = shot.get("role", f"Shot {idx}")
+            scene_prompts.append(img_p)
+            shot_motion_prompts[idx] = mot_p
+            shot_roles[idx] = role
+        logger.info(f"[+] Using {len(scene_prompts)} cinematic storyboard director shots.")
+    elif scene_prompts_override and len(scene_prompts_override) > 0:
         scene_prompts = [str(p).strip() for p in scene_prompts_override if str(p).strip()][:max_frames]
         logger.info(f"[+] Using {len(scene_prompts)} pre-computed narrative scene prompts.")
     elif script_json:
@@ -1889,11 +1903,13 @@ def generate_scene_visuals(
             continue
 
         generated_file: Optional[Path] = None
+        motion_prompt = shot_motion_prompts.get(idx, prompt)
+        shot_role = shot_roles.get(idx, f"Shot {idx}")
 
         if is_dit:
-            logger.info(f"Rendering Theatrical DiT I2V video {idx}/{len(scene_prompts)} ({num_frames} frames @ {frame_rate}fps): '{prompt[:50]}'...")
+            logger.info(f"Rendering Theatrical DiT I2V video {idx}/{len(scene_prompts)} [{shot_role}] ({num_frames} frames @ {frame_rate}fps): '{motion_prompt[:50]}'...")
             generated_file = generate_theatrical_i2v_clip(
-                prompt_text=prompt,
+                prompt_text=motion_prompt,
                 output_path=target_video,
                 keyframe_image=keyframe_file if keyframe_file.exists() else None,
                 num_frames=num_frames,
@@ -1903,6 +1919,31 @@ def generate_scene_visuals(
                 image_strength=image_strength,
                 cfg=cfg,
             )
+
+            # MotionGuard Optical Flow Quality Control (Prevents static/frozen clips)
+            if generated_file and target_video.exists() and target_video.stat().st_size > 1000:
+                try:
+                    from motion_guard import MotionGuard
+                    is_moving, score, reason = MotionGuard.verify_video_motion(target_video)
+                    if not is_moving:
+                        logger.warning(
+                            f"[-] MotionGuard: Shot {idx} [{shot_role}] has insufficient motion (Score {score:.2f}: {reason}). "
+                            "Re-sampling once with elevated kinetic directorship and boost..."
+                        )
+                        elevated_motion = f"{motion_prompt}, highly dynamic fluid motion, turbulent physical action, vivid camera movement"
+                        generate_theatrical_i2v_clip(
+                            prompt_text=elevated_motion,
+                            output_path=target_video,
+                            keyframe_image=keyframe_file if keyframe_file.exists() else None,
+                            num_frames=num_frames,
+                            frame_rate=frame_rate,
+                            width=768,
+                            height=1024,
+                            image_strength=min(0.85, image_strength + 0.08),
+                            cfg=cfg + 0.5,
+                        )
+                except Exception as mg_err:
+                    logger.debug(f"MotionGuard check skipped: {mg_err}")
         elif can_video:
             logger.info(f"Rendering ComfyUI AnimateDiff video {idx}/{len(scene_prompts)} ({num_frames} frames @ {frame_rate}fps): '{prompt[:50]}'...")
             generated_file = generate_comfyui_video(

@@ -43,6 +43,9 @@ from common.whisper_utils import transcribe_audio_words
 from common.stock_media import download_batch_stock_videos
 from common.publishing import publish_to_all_platforms
 from common.audio_mastering import master_voice_with_ambient
+from common.sound_director import SoundDirector
+from storyboard_director import TheatricalStoryboardDirector
+from motion_guard import MotionGuard
 
 from topic_catalog import pick_random_topic, generate_title_variants, CATEGORIES
 from analytics_feedback import AyurvedaAnalyticsDB, FeedbackOptimizer
@@ -204,7 +207,7 @@ def generate_video_assets(
     mastered_audio_path = work_dir / "voiceover_master.wav"
     subtitles_path = work_dir / "subtitles.json"
 
-    def _worker_audio_and_subtitles() -> Tuple[Path, Dict[str, Any], float]:
+    def _worker_audio_and_subtitles() -> Tuple[Path, Path, Dict[str, Any], float]:
         logger.info("[Async Audio] Generating neural speech via Kokoro/Edge-TTS...")
         try:
             synthesize_with_kokoro(
@@ -217,44 +220,50 @@ def generate_video_assets(
             logger.warning(f"Kokoro TTS offline ({tts_err}). Falling back to Edge-TTS...")
             synthesize_with_edge(text=combined_text, output_path=raw_voice_path)
 
-        # Master audio with deep 432Hz ambient frequency bed (-22dB) for documentary feel
-        try:
-            master_voice_with_ambient(voice_wav=raw_voice_path, output_wav=mastered_audio_path, ambient_db=-22.0)
-        except Exception as master_err:
-            logger.warning(f"Audio mastering fallback to raw: {master_err}")
-            shutil.copyfile(raw_voice_path, mastered_audio_path)
-
         logger.info("[Async Audio] Extracting word-level subtitles via Whisper...")
-        w_res = transcribe_audio_words(audio_path=mastered_audio_path, output_json_path=subtitles_path)
+        w_res = transcribe_audio_words(audio_path=raw_voice_path, output_json_path=subtitles_path)
         segs = w_res.get("segments", [])
-        dur = float(segs[-1].get("end", 45.0)) if segs else 45.0
-        return mastered_audio_path, w_res, dur
+        dur = float(segs[-1].get("end", 40.0)) if segs else 40.0
+        return raw_voice_path, mastered_audio_path, w_res, dur
 
-    def _worker_llm_scene_prompts() -> List[str]:
-        logger.info("[Async LLM] Generating contextual storyboard prompts for narrative beats...")
-        prompts = generate_contextual_scene_prompts(
+    def _worker_theatrical_storyboard() -> List[Dict[str, Any]]:
+        logger.info("[Async Director] Generating 10-12 bespoke cinematic shots with 0 modulo loops...")
+        shots = TheatricalStoryboardDirector.generate_theatrical_storyboard(
             script_json=script_json,
             topic_data=selected_topic,
-            num_scenes=5,
+            total_duration_sec=40.0,
         )
-        # Immediately evict all Ollama models from GPU VRAM so ComfyUI has maximum memory
         try:
             from common.ollama_client import unload_all_ollama_models
             unload_all_ollama_models()
-            logger.info("[Async LLM] [+] Evicted all Ollama models from VRAM.")
+            logger.info("[Async Director] [+] Evicted all Ollama models from VRAM.")
         except Exception as e:
             logger.debug(f"Ollama unload notification: {e}")
-        return prompts
+        return shots
 
-    logger.info("[*] Starting parallel pre-computation of Audio/Whisper and LLM Storyboard Prompts...")
+    logger.info("[*] Starting parallel pre-computation of Audio/Whisper and Theatrical Storyboard...")
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         fut_audio = executor.submit(_worker_audio_and_subtitles)
-        fut_prompts = executor.submit(_worker_llm_scene_prompts)
+        fut_storyboard = executor.submit(_worker_theatrical_storyboard)
 
-        mastered_audio_path, whisper_result, duration_sec = fut_audio.result()
-        precomputed_scene_prompts = fut_prompts.result()
+        raw_voice_path, mastered_audio_path, whisper_result, duration_sec = fut_audio.result()
+        storyboard_shots = fut_storyboard.result()
 
-    logger.info(f"[+] Pre-computed in parallel: Audio duration={duration_sec:.1f}s, Storyboard Prompts={len(precomputed_scene_prompts)}")
+    # Retime storyboard precisely to measured audio duration
+    storyboard_shots = TheatricalStoryboardDirector._normalize_and_time_shots(
+        storyboard_shots, total_duration_sec=duration_sec, target_count=len(storyboard_shots)
+    )
+
+    # Master Theatrical Multi-Track Foley Soundtrack (Voiceover + SFX + Transition Whooshes + 432Hz Bed)
+    logger.info("[*] Building Theatrical Multi-Track Foley Soundtrack...")
+    sound_director = SoundDirector()
+    sound_director.build_theatrical_soundtrack(
+        voice_path=raw_voice_path,
+        output_path=mastered_audio_path,
+        shot_definitions=storyboard_shots,
+    )
+
+    logger.info(f"[+] Multi-Track Audio Mastered: duration={duration_sec:.1f}s, Storyboard Shots={len(storyboard_shots)}")
 
     # Flatten word timestamps for Remotion
     words_list: List[Dict[str, Any]] = []
@@ -286,18 +295,18 @@ def generate_video_assets(
     # Priority 1: Check ComfyUI (defaults to http://0.0.0.0:8188/ unless overridden by COMFYUI_URL)
     logger.info("Checking ComfyUI availability for bespoke visual generation...")
     if is_comfyui_available():
-        logger.info(f"[*] ComfyUI server active! Generating photorealistic AI visuals for {len(stock_queries)} narrative beats...")
+        logger.info(f"[*] ComfyUI server active! Generating photorealistic AI visuals for {len(storyboard_shots)} storyboard shots...")
         ai_paths = generate_scene_visuals(
             topic_data=selected_topic,
             output_dir=work_dir / "ai_visuals",
             queries=stock_queries,
             script_json=script_json,
-            max_frames=6,
-            num_frames=121, # ~5.04s @ 24fps theatrical DiT video (8n+1 requirement)
+            max_frames=len(storyboard_shots),
+            num_frames=81, # Clamped to 81 frames (~3.37s @ 24fps) to eliminate 2s latent degradation
             frame_rate=24, # 24fps cinematic documentary motion
             image_strength=image_strength,
             cfg=cfg,
-            scene_prompts_override=precomputed_scene_prompts,
+            storyboard_shots=storyboard_shots,
         )
         ai_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
         ai_has_video = any(p.suffix.lower() in [".mp4", ".webm", ".mov"] for p in ai_clips)
@@ -345,12 +354,22 @@ def generate_video_assets(
     if not visual_clips:
         logger.warning("No visual clips available from ComfyUI or stock APIs; using procedural canvas fallback.")
 
-    # 6. Construct Frame-Synchronized Visual Scenes
-    # Maps each clip directly to spoken sentence segments so cuts are time-accurate
+    # 6. Construct Frame-Synchronized Visual Scenes (Zero Modulo Repetition)
     scenes: List[Dict[str, Any]] = []
     num_clips = len(visual_clips)
 
-    if num_clips == 1 and visual_clips[0].suffix.lower() in [".mp4", ".webm", ".mov"]:
+    if storyboard_shots and num_clips > 0:
+        logger.info(f"[+] Aligning {len(storyboard_shots)} bespoke cinematic shots (Zero Modulo Loops)...")
+        for s_idx, shot in enumerate(storyboard_shots):
+            if s_idx < num_clips:
+                start_f = int(shot["start_sec"] * fps)
+                dur_f = int(shot["duration_sec"] * fps)
+                scenes.append({
+                    "clip": str(visual_clips[s_idx]),
+                    "startFrame": start_f,
+                    "durationFrames": dur_f,
+                })
+    elif num_clips == 1 and visual_clips[0].suffix.lower() in [".mp4", ".webm", ".mov"]:
         # Single continuous master background video covering the full Short duration
         total_frames = int(duration_sec * fps)
         scenes.append({
@@ -368,12 +387,12 @@ def generate_video_assets(
             seg_dur = seg_end - current_scene_start
             is_last = (s_idx == len(segments) - 1)
 
-            # Cut scene on natural sentence boundary when duration reaches >= 4.0s (or on last segment)
-            if seg_dur >= 4.0 or is_last:
+            # Cut scene on natural sentence boundary when duration reaches >= 3.5s (or on last segment)
+            if seg_dur >= 3.5 or is_last:
                 start_f = int(current_scene_start * fps)
                 end_f = int(seg_end * fps)
                 dur_f = max(fps * 2, end_f - start_f)
-                assigned_clip = visual_clips[clip_idx % num_clips]
+                assigned_clip = visual_clips[min(clip_idx, num_clips - 1)]
 
                 scenes.append({
                     "clip": str(assigned_clip),

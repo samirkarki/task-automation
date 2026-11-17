@@ -132,25 +132,16 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
               })
             : 1;
 
-        // Subtle, continuous documentary Ken Burns drift so frames NEVER freeze into static stills
-        const kenBurnsScale = interpolate(
-          localFrame,
-          [0, Math.max(1, duration)],
-          [1.0, 1.07],
-          { extrapolateRight: "clamp" }
-        );
-        const kenBurnsX = interpolate(
-          localFrame,
-          [0, Math.max(1, duration)],
-          [0, idx % 2 === 0 ? 8 : -8],
-          { extrapolateRight: "clamp" }
-        );
-        const kenBurnsY = interpolate(
-          localFrame,
-          [0, Math.max(1, duration)],
-          [0, -5],
-          { extrapolateRight: "clamp" }
-        );
+        // Cinematic cubic ease-in-out progress for organic documentary camera movement
+        const rawProgress = Math.min(1.0, Math.max(0.0, localFrame / Math.max(1, duration)));
+        const easedProgress =
+          rawProgress < 0.5
+            ? 2 * rawProgress * rawProgress
+            : 1 - Math.pow(-2 * rawProgress + 2, 2) / 2;
+
+        const kenBurnsScale = interpolate(easedProgress, [0, 1], [1.0, 1.07]);
+        const kenBurnsX = interpolate(easedProgress, [0, 1], [0, idx % 2 === 0 ? 8 : -8]);
+        const kenBurnsY = interpolate(easedProgress, [0, 1], [0, -5]);
 
         return (
           <Sequence
@@ -221,6 +212,20 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
           </Sequence>
         );
       })}
+
+      {/* Cinematic 35mm film vignette & warm Kodak 2383 grading pass */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          background: "radial-gradient(circle at 50% 50%, transparent 58%, rgba(0, 0, 0, 0.40) 100%)",
+          pointerEvents: "none",
+          zIndex: 98,
+        }}
+      />
 
       {/* Subtle bottom shadow exclusively behind lower captions for crisp text legibility without dimming the video */}
       <div
