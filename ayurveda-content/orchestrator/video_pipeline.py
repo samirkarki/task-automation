@@ -292,8 +292,8 @@ def generate_video_assets(
             output_dir=work_dir / "ai_visuals",
             queries=stock_queries,
             script_json=script_json,
-            max_frames=5,
-            num_frames=97, # ~4.04s @ 24fps theatrical DiT video
+            max_frames=6,
+            num_frames=121, # ~5.04s @ 24fps theatrical DiT video (8n+1 requirement)
             frame_rate=24, # 24fps cinematic documentary motion
             image_strength=image_strength,
             cfg=cfg,
@@ -305,22 +305,10 @@ def generate_video_assets(
         if ai_has_video:
             video_only_clips = [p for p in ai_clips if p.suffix.lower() in [".mp4", ".webm", ".mov"]]
             logger.info(f"[+] Successfully generated {len(video_only_clips)} bespoke ComfyUI AI video clips.")
-            # Stitch clips into a single continuous background video with smooth 1-second crossfades
-            continuous_bg_path = work_dir / "continuous_background.mp4"
-            logger.info("Stitching ComfyUI video clips into seamless continuous background with smooth crossfades...")
-            stitched = stitch_continuous_background_video(
-                clip_paths=video_only_clips,
-                output_path=continuous_bg_path,
-                target_duration=duration_sec,
-                crossfade_sec=1.0,
-                fps=fps,
-            )
-            if stitched and stitched.exists() and stitched.stat().st_size > 1000:
-                visual_clips = [stitched]
-                logger.info(f"[+] Continuous background video created successfully: {stitched.name}")
-            else:
-                logger.warning("Continuous background stitching unavailable; using individual ComfyUI clips with scene crossfades.")
-                visual_clips = ai_clips
+            # Use bespoke ComfyUI video clips directly so Remotion synchronizes cuts to exact
+            # spoken sentence boundaries and performs broadcast-grade 18-frame cross-dissolves without black gaps
+            visual_clips = video_only_clips
+            logger.info(f"[+] Assigned {len(visual_clips)} bespoke DiT scene clips for sentence-synchronized composition.")
         elif ai_clips:
             # ComfyUI generated only still images (.jpg). Fetch stock video clips to interleave with AI stills so the final video has real video motion!
             stock_clips_dir = work_dir / "clips"

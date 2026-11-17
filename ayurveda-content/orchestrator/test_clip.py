@@ -84,7 +84,7 @@ def run_quick_test(
     print(f"Target:      {output_video}")
     print(f"Mode:        {mode_str}")
     print(f"CFG Scale:   {cfg}")
-    print(f"Frame Count: 97 frames (~4.04s @ 24fps)")
+    print(f"Frame Count: 121 frames (~5.04s @ 24fps)")
     print(f"Resolution:  768x1024 (9:16 portrait)")
     print(f"Keyframe:    {keyframe_img.name if keyframe_img else ('Auto (T2V fallback if no 2D model)' if not force_t2v else 'Disabled (Force T2V)')}")
     print("=" * 68 + "\n")
@@ -99,7 +99,7 @@ def run_quick_test(
         prompt_text=prompt,
         output_path=output_video,
         keyframe_image=False if force_t2v else keyframe_img,
-        num_frames=97, # 4.04s @ 24fps
+        num_frames=121, # ~5.04s @ 24fps (adheres to 8n+1)
         frame_rate=24,
         width=768,
         height=1024,

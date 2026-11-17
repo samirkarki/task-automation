@@ -93,6 +93,9 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
     renderItems.length === 1 &&
     renderItems[0].duration >= durationInFrames - 45;
 
+  // Broadcast-quality crossfade duration in frames (18 frames = 0.6 seconds at 30fps)
+  const CROSSFADE_FRAMES = 18;
+
   return (
     <div
       style={{
@@ -113,45 +116,72 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
             : staticFile(clipSrc);
         const isVideo = /\.(mp4|webm|mov)(\?|$)/i.test(clipSrc);
 
-        // Smooth 15-frame cross-dissolve between scenes in multi-clip mode
+        // Keep outgoing scene mounted during crossfade so incoming scene dissolves ON TOP of it (ZERO black gap)
+        const isLast = idx === renderItems.length - 1;
+        const extendedDuration = isSingleContinuous
+          ? duration
+          : duration + (isLast ? 0 : CROSSFADE_FRAMES);
+
+        // Incoming scene dissolves in smoothly over CROSSFADE_FRAMES
+        const localFrame = frame - fromFrame;
         const crossfadeOpacity =
           !isSingleContinuous && idx > 0
-            ? interpolate(frame - fromFrame, [0, 15], [0, 1], {
+            ? interpolate(localFrame, [0, CROSSFADE_FRAMES], [0, 1], {
                 extrapolateLeft: "clamp",
                 extrapolateRight: "clamp",
               })
             : 1;
 
+        // Subtle, continuous documentary Ken Burns drift so frames NEVER freeze into static stills
+        const kenBurnsScale = interpolate(
+          localFrame,
+          [0, Math.max(1, duration)],
+          [1.0, 1.07],
+          { extrapolateRight: "clamp" }
+        );
+        const kenBurnsX = interpolate(
+          localFrame,
+          [0, Math.max(1, duration)],
+          [0, idx % 2 === 0 ? 8 : -8],
+          { extrapolateRight: "clamp" }
+        );
+        const kenBurnsY = interpolate(
+          localFrame,
+          [0, Math.max(1, duration)],
+          [0, -5],
+          { extrapolateRight: "clamp" }
+        );
+
         return (
           <Sequence
             key={item.key}
             from={fromFrame}
-            durationInFrames={duration}
+            durationInFrames={extendedDuration}
           >
             <div
               style={{
                 width: "100%",
                 height: "100%",
-                position: "relative",
-                overflow: "hidden",
+                position: "absolute",
+                top: 0,
+                left: 0,
+                zIndex: idx + 1,
                 opacity: crossfadeOpacity,
+                overflow: "hidden",
               }}
             >
-              {isVideo ? (
-                isSingleContinuous ? (
-                  // Continuous master background: plays straight through without looping
-                  <OffthreadVideo
-                    src={resolvedSrc}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      filter: "brightness(1.02) contrast(1.02)",
-                    }}
-                  />
-                ) : (
-                  // Multi-clip fallback: loop only at scene boundary, never at 2-second intervals
-                  <Loop durationInFrames={Math.max(duration, 180)}>
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  position: "relative",
+                  transform: `scale(${kenBurnsScale}) translate(${kenBurnsX}px, ${kenBurnsY}px)`,
+                  transformOrigin: "center center",
+                }}
+              >
+                {isVideo ? (
+                  isSingleContinuous ? (
+                    // Continuous master background: plays straight through without looping
                     <OffthreadVideo
                       src={resolvedSrc}
                       style={{
@@ -161,33 +191,32 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
                         filter: "brightness(1.02) contrast(1.02)",
                       }}
                     />
-                  </Loop>
-                )
-              ) : (
-                <Img
-                  src={resolvedSrc}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    filter: "brightness(1.02) contrast(1.02)",
-                    transform: `scale(${interpolate(
-                      frame - fromFrame,
-                      [0, Math.max(1, duration)],
-                      [1.0, 1.14],
-                      { extrapolateRight: "clamp" }
-                    )}) translate(${interpolate(
-                      frame - fromFrame,
-                      [0, Math.max(1, duration)],
-                      [0, idx % 2 === 0 ? 12 : -12]
-                    )}px, ${interpolate(
-                      frame - fromFrame,
-                      [0, Math.max(1, duration)],
-                      [0, -8]
-                    )}px)`,
-                  }}
-                />
-              )}
+                  ) : (
+                    // Multi-clip: Loop seamlessly if speech segment exceeds clip length (120 frames)
+                    <Loop durationInFrames={Math.min(120, duration)}>
+                      <OffthreadVideo
+                        src={resolvedSrc}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          filter: "brightness(1.02) contrast(1.02)",
+                        }}
+                      />
+                    </Loop>
+                  )
+                ) : (
+                  <Img
+                    src={resolvedSrc}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      filter: "brightness(1.02) contrast(1.02)",
+                    }}
+                  />
+                )}
+              </div>
             </div>
           </Sequence>
         );
@@ -204,6 +233,7 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
           background:
             "linear-gradient(to top, rgba(0, 0, 0, 0.45) 0%, transparent 100%)",
           pointerEvents: "none",
+          zIndex: 99,
         }}
       />
     </div>

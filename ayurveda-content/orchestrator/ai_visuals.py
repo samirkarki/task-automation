@@ -1163,13 +1163,52 @@ def generate_master_keyframe(
     )
 
 
+def construct_kinetic_motion_prompt(prompt_text: str) -> str:
+    """
+    Constructs an intelligent, scene-appropriate motion directorship prompt for LTX-Video.
+    Tailors dynamic kinetic descriptors to the specific semantic subjects in the scene:
+      - Liquids/Beverages/Teas: Steam billowing, fluid ripples, liquid swirling, macro pouring.
+      - People/Faces/Emotions: Natural breathing, expressive blinking, subtle head tilt, soft glance.
+      - Ingredients/Herbs/Kitchen: Sunlight moving, dust motes drifting, camera parallax pan.
+      - General: Cinematic slow dolly push-in, rich textural depth, living motion.
+    """
+    p_lower = prompt_text.lower()
+    
+    # 1. Human / Portrait / Emotion scenes
+    if any(k in p_lower for k in ["person", "man", "woman", "face", "eyes", "stomach", "tired", "smiling", "holding", "looking", "sitting", "standing"]):
+        kinetic_desc = (
+            "subtle natural breathing movement, organic micro-expressions, gentle natural head motion, "
+            "soft expressive blinking, cinematic shallow depth of field portrait drift, photorealistic living subject"
+        )
+    # 2. Liquids / Teas / Water / Beverages
+    elif any(k in p_lower for k in ["tea", "water", "cup", "mug", "infusion", "drink", "soup", "liquid", "pour", "steam", "boil", "beverage", "decoction"]):
+        kinetic_desc = (
+            "delicate rising swirling steam, gentle ripples and liquid surface movement, soft steam evaporation, "
+            "living fluid dynamics, cinematic slow dolly push-in, macro documentary detail"
+        )
+    # 3. Ingredients / Spices / Botanicals / Kitchen
+    elif any(k in p_lower for k in ["fruit", "herb", "ginger", "table", "kitchen", "mortar", "spice", "lemon", "tulsi", "cinnamon", "cutting"]):
+        kinetic_desc = (
+            "slow macro camera pan, dynamic sunbeams and drifting dust motes in warm morning sunlight, "
+            "subtle natural camera parallax, vibrant organic depth, cinematic lighting shift"
+        )
+    # 4. Default / General cinematic motion
+    else:
+        kinetic_desc = (
+            "smooth cinematic camera push-in dolly shot, subtle natural atmospheric motion, "
+            "dynamic lighting shifts, professional 24fps documentary cinematography, rich depth"
+        )
+
+    return f"{prompt_text}. Dynamic cinematic video footage, {kinetic_desc}, photorealistic 24fps documentary cinematography, sharp natural lighting."
+
+
 def generate_theatrical_i2v_clip(
     prompt_text: str,
     output_path: Path,
     keyframe_image: Optional[Union[str, Path, bool]] = None,
     negative_prompt: Optional[str] = None,
     base_url: Optional[str] = None,
-    num_frames: int = 97,
+    num_frames: int = 121,
     frame_rate: int = 24,
     width: int = 768,
     height: int = 1024,
@@ -1226,15 +1265,16 @@ def generate_theatrical_i2v_clip(
     seed = random.randint(1, 1_000_000_000)
     client_id = str(uuid.uuid4())
 
-    motion_prompt = (
-        f"{prompt_text}. Dynamic cinematic video footage, continuous slow camera push-in dolly shot, "
-        "billowing swirling rising steam from the hot liquid, living fluid dynamics with gentle ripples on the surface, "
-        "organic natural movement, photorealistic 24fps documentary cinematography, sharp lighting."
-    )
+    # Adaptive motion directorship & subject-aware strength
+    p_lower = prompt_text.lower()
+    is_human = any(k in p_lower for k in ["person", "man", "woman", "face", "eyes", "stomach", "tired", "smiling", "holding"])
+    effective_strength = min(image_strength, 0.65) if is_human else image_strength
+
+    motion_prompt = construct_kinetic_motion_prompt(prompt_text)
     motion_neg = (
         negative_prompt
         or "static, still frame, motionless, paused video, still photo, frozen, stationary, slideshow, "
-        "distorted, jitter, warp, stutter, morphing faces, ugly, cartoon, illustration, low resolution, blurry, watermark"
+        "harsh stutter, jitter, sudden jump cut, distorted anatomy, morphing faces, ugly, cartoon, illustration, low resolution, blurry, watermark"
     )
 
     # Frame count for LTX-Video must adhere to 8n + 1 (e.g. 65, 81, 97, 121)
@@ -1286,7 +1326,7 @@ def generate_theatrical_i2v_clip(
                 "height": height,
                 "length": valid_frames,
                 "batch_size": 1,
-                "strength": image_strength,
+                "strength": effective_strength,
             },
         }
         prompt_graph["6"] = {
@@ -1721,8 +1761,8 @@ def generate_scene_visuals(
     output_dir: Path,
     queries: Optional[List[str]] = None,
     script_json: Optional[Dict[str, Any]] = None,
-    max_frames: int = 5,
-    num_frames: int = 97,
+    max_frames: int = 6,
+    num_frames: int = 121,
     frame_rate: int = 24,
     image_strength: float = 0.70,
     cfg: float = 3.5,
