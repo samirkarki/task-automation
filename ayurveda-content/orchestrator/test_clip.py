@@ -51,13 +51,23 @@ def run_quick_test(
     force_t2v: bool = False,
     upload: bool = False,
     privacy: str = "unlisted",
+    strength: float = 0.70,
+    cfg: float = 3.5,
+    new_keyframe: bool = False,
 ):
     output_dir = PROJECT_ROOT / "ayurveda-content" / "orchestrator" / "output" / "test_run"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_video = output_dir / "test_clip_4s.mp4"
-    keyframe_img: Optional[Path] = None
+    keyframe_candidate = output_dir / "test_clip_4s_keyframe.png"
+    if new_keyframe and keyframe_candidate.exists():
+        try:
+            keyframe_candidate.unlink()
+            print(f"[i] Cleared existing master keyframe '{keyframe_candidate.name}' for fresh Phase 1 generation.")
+        except Exception:
+            pass
 
+    keyframe_img: Optional[Path] = None
     if image_path:
         p = Path(image_path).resolve()
         if p.exists() and p.stat().st_size > 100:
@@ -66,11 +76,14 @@ def run_quick_test(
         else:
             print(f"[-] Provided image not found: {image_path}. Continuing...")
 
+    mode_str = "Text-to-Video (Pure Motion, No Keyframe)" if force_t2v else (f"Image-to-Video (Keyframe Lock, Strength={strength:.2f})")
     print("\n" + "=" * 68)
     print("🎬 4-5s THEATRICAL DiT (LTX-VIDEO) TEST GENERATION")
     print("=" * 68)
     print(f"Prompt:      {prompt}")
     print(f"Target:      {output_video}")
+    print(f"Mode:        {mode_str}")
+    print(f"CFG Scale:   {cfg}")
     print(f"Frame Count: 97 frames (~4.04s @ 24fps)")
     print(f"Resolution:  768x1024 (9:16 portrait)")
     print(f"Keyframe:    {keyframe_img.name if keyframe_img else ('Auto (T2V fallback if no 2D model)' if not force_t2v else 'Disabled (Force T2V)')}")
@@ -85,11 +98,13 @@ def run_quick_test(
     res_path = generate_theatrical_i2v_clip(
         prompt_text=prompt,
         output_path=output_video,
-        keyframe_image=keyframe_img if not force_t2v else None,
+        keyframe_image=False if force_t2v else keyframe_img,
         num_frames=97, # 4.04s @ 24fps
         frame_rate=24,
         width=768,
         height=1024,
+        image_strength=strength,
+        cfg=cfg,
         timeout_sec=360,
     )
 
@@ -153,10 +168,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prompt",
         type=str,
-        default="Steaming hot herbal infusion in a brass cup on rustic sunlit wooden table, delicate rising steam, professional 8k documentary cinematography",
+        default="Steaming hot herbal infusion in a rustic brass cup on a sunlit wooden table, thick swirling steam billowing upwards, visible fluid ripples, continuous cinematic camera dolly push-in, 8k documentary footage",
         help="Prompt description for keyframe and motion",
     )
     parser.add_argument("--image", type=str, default=None, help="Optional path to existing keyframe image for Image-to-Video")
+    parser.add_argument("--strength", type=float, default=0.70, help="Image conditioning strength for I2V (0.50-0.85, default 0.70)")
+    parser.add_argument("--cfg", type=float, default=3.5, help="CFG guidance scale (default 3.5)")
+    parser.add_argument("--new-keyframe", action="store_true", help="Clear cached keyframe and generate a fresh master still")
     parser.add_argument("--t2v", action="store_true", help="Force Text-to-Video mode (EmptyLTXVLatentVideo) without keyframe")
     parser.add_argument("--upload", action="store_true", help="Upload the 4s clip to YouTube as Unlisted upon completion")
     parser.add_argument("--privacy", type=str, choices=["unlisted", "private", "public"], default="unlisted", help="YouTube privacy")
@@ -168,4 +186,7 @@ if __name__ == "__main__":
         force_t2v=args.t2v,
         upload=args.upload,
         privacy=args.privacy,
+        strength=args.strength,
+        cfg=args.cfg,
+        new_keyframe=args.new_keyframe,
     )

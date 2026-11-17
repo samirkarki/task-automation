@@ -997,13 +997,16 @@ def generate_master_keyframe(
 def generate_theatrical_i2v_clip(
     prompt_text: str,
     output_path: Path,
-    keyframe_image: Optional[Union[str, Path]] = None,
+    keyframe_image: Optional[Union[str, Path, bool]] = None,
     negative_prompt: Optional[str] = None,
     base_url: Optional[str] = None,
     num_frames: int = 97,
     frame_rate: int = 24,
     width: int = 768,
     height: int = 1024,
+    image_strength: float = 0.70,
+    cfg: float = 3.5,
+    steps: int = 25,
     timeout_sec: int = 600,
 ) -> Optional[Path]:
     """
@@ -1011,7 +1014,7 @@ def generate_theatrical_i2v_clip(
     1. Ensures a locked master keyframe image exists (generates via SDXL/FLUX if not provided).
     2. Uploads the keyframe into ComfyUI's input pool.
     3. Chains LTXVImgToVideo -> KSampler -> VAEDecode -> VHS_VideoCombine.
-    4. Guarantees 100% visual consistency and zero identity drift.
+    4. Guarantees visual consistency and cinematic motion dynamics without identity drift.
     """
     if not is_comfyui_available(base_url):
         return None
@@ -1020,8 +1023,10 @@ def generate_theatrical_i2v_clip(
     keyframe_path: Optional[Path] = None
     caps = detect_comfyui_capabilities(base_url)
 
-    if keyframe_image and Path(keyframe_image).exists() and Path(keyframe_image).stat().st_size > 1000:
-        keyframe_path = Path(keyframe_image).resolve()
+    if keyframe_image is False:
+        logger.info("[i] Text-to-Video mode explicitly forced. Bypassing master keyframe image lock.")
+    elif keyframe_image and Path(str(keyframe_image)).exists() and Path(str(keyframe_image)).stat().st_size > 1000:
+        keyframe_path = Path(str(keyframe_image)).resolve()
         logger.info(f"Using provided master keyframe for I2V: {keyframe_path.name}")
     elif caps.get("keyframe_checkpoint"):
         candidate_p = output_path.with_name(f"{output_path.stem}_keyframe.png")
@@ -1053,12 +1058,14 @@ def generate_theatrical_i2v_clip(
     client_id = str(uuid.uuid4())
 
     motion_prompt = (
-        f"{prompt_text}. Theatrical 24fps cinema, slow cinematic camera push-in, subtle natural movement, "
-        "gentle steam rising, realistic fluid dynamics, crisp cinematic lighting, 8k documentary footage, photorealistic."
+        f"{prompt_text}. Dynamic cinematic video footage, continuous slow camera push-in dolly shot, "
+        "billowing swirling rising steam from the hot liquid, living fluid dynamics with gentle ripples on the surface, "
+        "organic natural movement, photorealistic 24fps documentary cinematography, sharp lighting."
     )
     motion_neg = (
         negative_prompt
-        or "distorted, jitter, warp, stutter, static, morphing faces, ugly, cartoon, illustration, low resolution, blurry, watermark"
+        or "static, still frame, motionless, paused video, still photo, frozen, stationary, slideshow, "
+        "distorted, jitter, warp, stutter, morphing faces, ugly, cartoon, illustration, low resolution, blurry, watermark"
     )
 
     # Frame count for LTX-Video must adhere to 8n + 1 (e.g. 65, 81, 97, 121)
@@ -1110,15 +1117,15 @@ def generate_theatrical_i2v_clip(
                 "height": height,
                 "length": valid_frames,
                 "batch_size": 1,
-                "strength": 1.0,
+                "strength": image_strength,
             },
         }
         prompt_graph["6"] = {
             "class_type": "KSampler",
             "inputs": {
                 "seed": seed,
-                "steps": 25,
-                "cfg": 3.0,
+                "steps": steps,
+                "cfg": cfg,
                 "sampler_name": "euler",
                 "scheduler": "normal",
                 "denoise": 1.0,
@@ -1144,8 +1151,8 @@ def generate_theatrical_i2v_clip(
             "class_type": "KSampler",
             "inputs": {
                 "seed": seed,
-                "steps": 25,
-                "cfg": 3.0,
+                "steps": steps,
+                "cfg": cfg,
                 "sampler_name": "euler",
                 "scheduler": "normal",
                 "denoise": 1.0,
