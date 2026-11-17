@@ -89,6 +89,10 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
         duration: framesPerClip,
       }));
 
+  const isSingleContinuous =
+    renderItems.length === 1 &&
+    renderItems[0].duration >= durationInFrames - 45;
+
   return (
     <div
       style={{
@@ -109,6 +113,15 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
             : staticFile(clipSrc);
         const isVideo = /\.(mp4|webm|mov)(\?|$)/i.test(clipSrc);
 
+        // Smooth 15-frame cross-dissolve between scenes in multi-clip mode
+        const crossfadeOpacity =
+          !isSingleContinuous && idx > 0
+            ? interpolate(frame - fromFrame, [0, 15], [0, 1], {
+                extrapolateLeft: "clamp",
+                extrapolateRight: "clamp",
+              })
+            : 1;
+
         return (
           <Sequence
             key={item.key}
@@ -121,10 +134,12 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
                 height: "100%",
                 position: "relative",
                 overflow: "hidden",
+                opacity: crossfadeOpacity,
               }}
             >
               {isVideo ? (
-                <Loop durationInFrames={60}>
+                isSingleContinuous ? (
+                  // Continuous master background: plays straight through without looping
                   <OffthreadVideo
                     src={resolvedSrc}
                     style={{
@@ -134,7 +149,20 @@ export const BackgroundVideos: React.FC<BackgroundVideosProps> = ({ clips = [], 
                       filter: "brightness(1.02) contrast(1.02)",
                     }}
                   />
-                </Loop>
+                ) : (
+                  // Multi-clip fallback: loop only at scene boundary, never at 2-second intervals
+                  <Loop durationInFrames={Math.max(duration, 180)}>
+                    <OffthreadVideo
+                      src={resolvedSrc}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        filter: "brightness(1.02) contrast(1.02)",
+                      }}
+                    />
+                  </Loop>
+                )
               ) : (
                 <Img
                   src={resolvedSrc}

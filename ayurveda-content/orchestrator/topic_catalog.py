@@ -213,13 +213,28 @@ HOOK_TEMPLATES = [
 
 def generate_title_variants(topic_data: Dict[str, Any]) -> Dict[str, str]:
     """Generates 3 optimized YouTube Shorts / Reels titles for A/B testing."""
-    subject = topic_data.get("subject", "")
-    dosha = topic_data.get("dosha", "Health")
+    subject = topic_data.get("subject", "").strip()
+    dosha = topic_data.get("dosha", "Health").strip()
+
+    # YouTube titles must not exceed 100 characters including " #Shorts" (8 chars)
+    max_body_len = 92  # 100 - 8
+
+    prefix_a = "The Ancient Ayurvedic Secret: "
+    rem_a = max(10, max_body_len - len(prefix_a))
+    body_a = subject[:rem_a].rstrip()
+
+    prefix_b = "STOP Doing This! Ayurvedic Warning on "
+    rem_b = max(10, max_body_len - len(prefix_b))
+    body_b = subject[:rem_b].rstrip()
+
+    prefix_c = f"1 Daily Habit for {dosha}: "
+    rem_c = max(10, max_body_len - len(prefix_c))
+    body_c = subject[:rem_c].rstrip()
 
     return {
-        "variant_a_curiosity": f"The Ancient Ayurvedic Secret: {subject[:65]} #Shorts",
-        "variant_b_warning": f"STOP Doing This! Ayurvedic Warning on {subject[:55]} #Shorts",
-        "variant_c_actionable": f"1 Daily Ayurvedic Habit for {dosha} Balance #Shorts",
+        "variant_a_curiosity": f"{prefix_a}{body_a} #Shorts",
+        "variant_b_warning": f"{prefix_b}{body_b} #Shorts",
+        "variant_c_actionable": f"{prefix_c}{body_c} #Shorts",
     }
 
 

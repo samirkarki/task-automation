@@ -42,7 +42,14 @@ from common.audio_mastering import master_voice_with_ambient
 
 from topic_catalog import pick_random_topic, generate_title_variants, CATEGORIES
 from analytics_feedback import AyurvedaAnalyticsDB, FeedbackOptimizer
-from ai_visuals import is_comfyui_available, generate_scene_visuals, diagnose_comfyui, free_comfyui_memory, COMFYUI_URL
+from ai_visuals import (
+    is_comfyui_available,
+    generate_scene_visuals,
+    diagnose_comfyui,
+    free_comfyui_memory,
+    stitch_continuous_background_video,
+    COMFYUI_URL,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ayurveda.pipeline")
@@ -217,6 +224,10 @@ def generate_video_assets(
                     "end": round(float(w.get("end", 0.0)), 2),
                 })
 
+    segments = whisper_result.get("segments", [])
+    duration_sec = float(segments[-1].get("end", 45.0)) if segments else 45.0
+    fps = 30
+
     # 5. Fetch Visual Footage Matching Chronological Narrative Beats
     subj = selected_topic.get("subject", "Ayurvedic wellness")
     fallback_stock = [
@@ -239,13 +250,32 @@ def generate_video_assets(
             output_dir=work_dir / "ai_visuals",
             queries=stock_queries,
             script_json=script_json,
+            max_frames=5,
+            num_frames=48,
+            frame_rate=8,
         )
         ai_clips = [Path(p) for p in ai_paths if Path(p).exists() and Path(p).stat().st_size > 1000]
         ai_has_video = any(p.suffix.lower() in [".mp4", ".webm", ".mov"] for p in ai_clips)
 
         if ai_has_video:
-            visual_clips = ai_clips
-            logger.info(f"[+] Successfully generated {len(visual_clips)} bespoke ComfyUI AI video clips. Bypassing stock downloads.")
+            video_only_clips = [p for p in ai_clips if p.suffix.lower() in [".mp4", ".webm", ".mov"]]
+            logger.info(f"[+] Successfully generated {len(video_only_clips)} bespoke ComfyUI AI video clips.")
+            # Stitch clips into a single continuous background video with smooth 1-second crossfades
+            continuous_bg_path = work_dir / "continuous_background.mp4"
+            logger.info("Stitching ComfyUI video clips into seamless continuous background with smooth crossfades...")
+            stitched = stitch_continuous_background_video(
+                clip_paths=video_only_clips,
+                output_path=continuous_bg_path,
+                target_duration=duration_sec,
+                crossfade_sec=1.0,
+                fps=fps,
+            )
+            if stitched and stitched.exists() and stitched.stat().st_size > 1000:
+                visual_clips = [stitched]
+                logger.info(f"[+] Continuous background video created successfully: {stitched.name}")
+            else:
+                logger.warning("Continuous background stitching unavailable; using individual ComfyUI clips with scene crossfades.")
+                visual_clips = ai_clips
         elif ai_clips:
             # ComfyUI generated only still images (.jpg). Fetch stock video clips to interleave with AI stills so the final video has real video motion!
             stock_clips_dir = work_dir / "clips"
@@ -282,15 +312,21 @@ def generate_video_assets(
     if not visual_clips:
         logger.warning("No visual clips available from ComfyUI or stock APIs; using procedural canvas fallback.")
 
-    segments = whisper_result.get("segments", [])
-    duration_sec = float(segments[-1].get("end", 45.0)) if segments else 45.0
-    fps = 30
-
     # 6. Construct Frame-Synchronized Visual Scenes
     # Maps each clip directly to spoken sentence segments so cuts are time-accurate
     scenes: List[Dict[str, Any]] = []
     num_clips = len(visual_clips)
-    if num_clips > 0 and segments:
+
+    if num_clips == 1 and visual_clips[0].suffix.lower() in [".mp4", ".webm", ".mov"]:
+        # Single continuous master background video covering the full Short duration
+        total_frames = int(duration_sec * fps)
+        scenes.append({
+            "clip": str(visual_clips[0]),
+            "startFrame": 0,
+            "durationFrames": total_frames,
+        })
+        logger.info(f"[+] Single continuous background scene registered: 0 to {total_frames} frames ({duration_sec:.1f}s)")
+    elif num_clips > 0 and segments:
         clip_idx = 0
         current_scene_start = 0.0
 

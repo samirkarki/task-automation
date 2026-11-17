@@ -696,12 +696,136 @@ def convert_animation_to_mp4(src_path: Path, dst_mp4: Path) -> bool:
         return False
 
 
+def probe_video_duration(video_path: Union[str, Path]) -> float:
+    """Returns the duration of a video file in seconds using ffprobe."""
+    vp = Path(video_path)
+    if not vp.exists():
+        return 6.0
+    try:
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(vp),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if res.returncode == 0 and res.stdout.strip():
+            return float(res.stdout.strip())
+    except Exception as e:
+        logger.debug(f"ffprobe duration error on {vp.name}: {e}")
+    return 6.0
+
+
+def stitch_continuous_background_video(
+    clip_paths: List[Union[str, Path]],
+    output_path: Union[str, Path],
+    target_duration: float,
+    crossfade_sec: float = 1.0,
+    fps: int = 30,
+) -> Optional[Path]:
+    """
+    Blends a sequence of video clips with smooth 1-second crossfade dissolves into
+    a single continuous background video matching target_duration.
+
+    1. Standardizes all clips to 1080x1920 (9:16 portrait) at the specified fps.
+    2. Chains FFmpeg `xfade` (transition=fade) filters dynamically across all clips.
+    3. Trims or extends seamlessly to target_duration.
+    4. Outputs a unified, unbroken MP4 background stream.
+    """
+    out_p = Path(output_path).resolve()
+    valid_clips = [Path(c).resolve() for c in clip_paths if Path(c).exists() and Path(c).stat().st_size > 1000]
+
+    if not valid_clips:
+        logger.warning("No valid video clips to stitch.")
+        return None
+
+    if len(valid_clips) == 1:
+        try:
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(valid_clips[0]),
+                "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps={fps}",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-r", str(fps),
+                "-t", str(target_duration),
+                str(out_p),
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if res.returncode == 0 and out_p.exists() and out_p.stat().st_size > 1000:
+                return out_p
+        except Exception as e:
+            logger.warning(f"Single clip standardization failed: {e}")
+            return valid_clips[0]
+
+    durations = [max(2.0, probe_video_duration(c)) for c in valid_clips]
+    logger.info(f"Stitching {len(valid_clips)} clips with durations: {[round(d, 1) for d in durations]}s (target: {target_duration:.1f}s)")
+
+    min_dur = min(durations)
+    actual_xfade = min(crossfade_sec, min_dur * 0.45)
+
+    filter_chains = []
+    for i in range(len(valid_clips)):
+        filter_chains.append(
+            f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps={fps}[s{i}]"
+        )
+
+    curr_label = "s0"
+    accum_dur = durations[0]
+    for i in range(1, len(valid_clips)):
+        offset = max(0.1, accum_dur - actual_xfade)
+        next_label = f"xf{i}" if i < len(valid_clips) - 1 else "final_xf"
+        filter_chains.append(
+            f"[{curr_label}][s{i}]xfade=transition=fade:duration={actual_xfade:.2f}:offset={offset:.2f}[{next_label}]"
+        )
+        curr_label = next_label
+        accum_dur = offset + durations[i]
+
+    if accum_dur < target_duration:
+        pad_dur = round(target_duration - accum_dur + 0.5, 2)
+        filter_chains.append(f"[{curr_label}]tpad=stop_mode=clone:stop_duration={pad_dur}[padded]")
+        curr_label = "padded"
+
+    filter_complex = ";".join(filter_chains)
+
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    cmd = ["ffmpeg", "-y"]
+    for c in valid_clips:
+        cmd.extend(["-i", str(c)])
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", f"[{curr_label}]",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        "-r", str(fps),
+        "-t", str(target_duration),
+        str(out_p),
+    ])
+
+    try:
+        logger.info(f"Executing continuous background stitching with FFmpeg ({len(valid_clips)} clips)...")
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        if res.returncode == 0 and out_p.exists() and out_p.stat().st_size > 1000:
+            logger.info(f"[+] Successfully stitched continuous background video: {out_p.name} ({out_p.stat().st_size // 1024} KB)")
+            return out_p
+        else:
+            logger.warning(f"FFmpeg crossfade stitch failed (code {res.returncode}): {res.stderr[:300]}")
+    except Exception as e:
+        logger.warning(f"Error during video stitching: {e}")
+
+    return None
+
+
 def generate_comfyui_video(
     prompt_text: str,
     output_path: Path,
     negative_prompt: Optional[str] = None,
     base_url: Optional[str] = None,
-    num_frames: int = 16,
+    num_frames: int = 48,
     frame_rate: int = 8,
     timeout_sec: int = 600,
 ) -> Optional[Path]:
@@ -790,6 +914,50 @@ def generate_comfyui_video(
                 },
             }
 
+        # Wire ADE_StandardUniformContextOptions to enable sliding-window temporal attention for long clips (>16 frames)
+        evolved_inputs: Dict[str, Any] = {
+            "model": ["1", 0],
+            "m_models": ["3", 0],
+        }
+
+        ctx_node = next((n for n in ["ADE_StandardUniformContextOptions", "ADE_AnimateDiffUniformContextOptions", "ADE_LoopedUniformContextOptions"] if n in ad_nodes), None)
+        if num_frames > 16 and ctx_node:
+            ctx_inputs: Dict[str, Any] = {
+                "context_length": 16,
+                "context_stride": 1,
+                "context_overlap": 4,
+            }
+            try:
+                resp, _ = safe_comfyui_request("GET", f"/object_info/{ctx_node}", base_url=base_url, timeout=3)
+                if resp.status_code == 200 and ctx_node in resp.json():
+                    req_spec = resp.json()[ctx_node].get("input", {}).get("required", {})
+                    if "fuse_method" in req_spec:
+                        f_opts = extract_combo_options(req_spec["fuse_method"])
+                        ctx_inputs["fuse_method"] = f_opts[0] if f_opts else "flat"
+            except Exception:
+                pass
+
+            prompt_graph["11"] = {
+                "class_type": ctx_node,
+                "inputs": ctx_inputs,
+            }
+
+            ctx_key = "context_options"
+            try:
+                resp, _ = safe_comfyui_request("GET", "/object_info/ADE_UseEvolvedSampling", base_url=base_url, timeout=3)
+                if resp.status_code == 200 and "ADE_UseEvolvedSampling" in resp.json():
+                    u_inputs = {
+                        **resp.json()["ADE_UseEvolvedSampling"].get("input", {}).get("required", {}),
+                        **resp.json()["ADE_UseEvolvedSampling"].get("input", {}).get("optional", {}),
+                    }
+                    if "context_options" in u_inputs:
+                        ctx_key = "context_options"
+                    elif "context_opts" in u_inputs:
+                        ctx_key = "context_opts"
+            except Exception:
+                pass
+            evolved_inputs[ctx_key] = ["11", 0]
+
         # Query ADE_UseEvolvedSampling beta_schedule options
         beta_schedule = "autoselect"
         try:
@@ -808,13 +976,11 @@ def generate_comfyui_video(
         except Exception:
             pass
 
+        evolved_inputs["beta_schedule"] = beta_schedule
+
         prompt_graph["10"] = {
             "class_type": "ADE_UseEvolvedSampling",
-            "inputs": {
-                "model": ["1", 0],
-                "beta_schedule": beta_schedule,
-                "m_models": ["3", 0],
-            },
+            "inputs": evolved_inputs,
         }
         model_ref = ["10", 0]
     elif loader_node == "ADE_AnimateDiffLoaderWithContext":
@@ -1002,7 +1168,9 @@ def generate_scene_visuals(
     output_dir: Path,
     queries: Optional[List[str]] = None,
     script_json: Optional[Dict[str, Any]] = None,
-    max_frames: int = 6,
+    max_frames: int = 5,
+    num_frames: int = 48,
+    frame_rate: int = 8,
 ) -> List[str]:
     """
     Generates cinematic AI visual frames or video clips for the video scenes via ComfyUI.
@@ -1079,8 +1247,13 @@ def generate_scene_visuals(
 
         # Try video first if supported
         if can_video:
-            logger.info(f"Rendering ComfyUI AnimateDiff video {idx}/{len(scene_prompts)}: '{prompt[:50]}'...")
-            generated_file = generate_comfyui_video(prompt, target_video)
+            logger.info(f"Rendering ComfyUI AnimateDiff video {idx}/{len(scene_prompts)} ({num_frames} frames @ {frame_rate}fps): '{prompt[:50]}'...")
+            generated_file = generate_comfyui_video(
+                prompt,
+                target_video,
+                num_frames=num_frames,
+                frame_rate=frame_rate,
+            )
 
         # Fallback to image if video not supported or video generation failed
         if not generated_file or not target_video.exists() or target_video.stat().st_size < 1000:
