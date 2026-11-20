@@ -1,12 +1,11 @@
 """
-Metadata Optimizer: Uses local Ollama to draft high-CTR Title A/B variants,
-SEO tags, and monetization-packed descriptions.
+Metadata Optimizer: Uses local Ollama or high-CTR templates to draft
+Title A/B variants, SEO tags, and descriptions customized per profile.
 """
 
 import json
 import logging
-import re
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 import requests
 
 from clipping.config import (
@@ -17,36 +16,51 @@ from clipping.config import (
     NICHE_CONFIG,
 )
 from clipping.models import ClipCandidate
+from clipping.profiles.base import ClipProfile
+from clipping.profiles import DEFAULT_PROFILE
 from clipping.publishing.affiliate_injector import inject_monetization_links
 
 logger = logging.getLogger("clipping.publishing.metadata_optimizer")
 
 
-def generate_metadata(clip: ClipCandidate, commentary: str) -> Dict[str, Any]:
+def generate_metadata(
+    clip: ClipCandidate,
+    commentary: str,
+    profile: Optional[ClipProfile] = None,
+) -> Dict[str, Any]:
     """
-    Generates A/B title variants, description with day-1 affiliate links, and pinned comment.
+    Generates A/B title variants, description, and pinned comment tuned for the active profile.
     """
-    prompt = f"""You are a YouTube Shorts SEO algorithm specialist for {NICHE_CONFIG['name']}.
-Given this video commentary, generate 2 click-worthy titles for A/B testing.
+    prof = profile or DEFAULT_PROFILE
 
-Commentary summary:
-"{commentary[:300]}"
+    # Build profile-specific default titles
+    if prof.name == "game-gta6":
+        title_a = f"{clip.hook_sentence[:48]} 💀 #Shorts"
+        title_b = f"GTA 6 Craziest Streamer Moment 😱 #Shorts"
+    elif prof.name == "mrbeast":
+        title_a = f"{clip.hook_sentence[:48]} 😱 #Shorts"
+        title_b = f"He Actually Survived This Challenge 🤯 #Shorts"
+    elif prof.name == "game-fortnite":
+        title_a = f"{clip.hook_sentence[:48]} 🔥 #Shorts"
+        title_b = f"Insane 200 IQ Fortnite Clutch 🏆 #Shorts"
+    else:
+        title_a = f"{clip.hook_sentence[:48]} 🤯 #Shorts"
+        title_b = f"How To Win In {prof.display_name} 📈 #Shorts"
 
-RULES:
-1. Title A (CURIOSITY GAP): Starts with 'This...', 'Why...', or 'The secret...'
-2. Title B (DIRECT VALUE): Starts with 'How to...', '3 Rules...', or 'The #1 way...'
-3. Length: Strictly under 65 characters each.
-4. Include 1 relevant emoji and end with '#Shorts'.
-5. Must accurately reflect the content (high CTR without bait-and-switch).
+    prompt = f"""You are a master YouTube Shorts SEO algorithm editor for {prof.display_name}.
+Given this clip highlight from {clip.source_channel}:
+"{clip.hook_sentence}"
+Transcript snippet: "{clip.transcript_segment[:200]}"
+
+Generate 2 click-worthy, viral YouTube Shorts titles for A/B testing:
+1. Title A: High curiosity/reaction, all caps or punchy (under 60 chars, 1 emoji, ends with #Shorts)
+2. Title B: Action/question hook (under 60 chars, 1 emoji, ends with #Shorts)
 
 Return ONLY valid JSON:
 {{
-  "title_a": "Why Working Harder Keeps You Broke 🤯 #Shorts",
-  "title_b": "How To Build Wealth With Real Leverage 📈 #Shorts"
+  "title_a": "{title_a}",
+  "title_b": "{title_b}"
 }}"""
-
-    title_a = f"{clip.hook_sentence[:50]} 🤯 #Shorts"
-    title_b = f"How To Win In Business & Wealth 📈 #Shorts"
 
     try:
         headers = {}
@@ -60,34 +74,47 @@ Return ONLY valid JSON:
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
-                "options": {"temperature": 0.7},
+                "options": {"temperature": 0.5},
             },
             headers=headers,
-            timeout=OLLAMA_TIMEOUT,
+            timeout=min(OLLAMA_TIMEOUT, 45),
         )
         if resp.status_code == 200:
             raw_text = resp.json().get("response", "").strip()
             data = json.loads(raw_text)
-            if data.get("title_a"):
+            if data.get("title_a") and len(data["title_a"].strip()) > 5:
                 title_a = data["title_a"].strip()
-            if data.get("title_b"):
+            if data.get("title_b") and len(data["title_b"].strip()) > 5:
                 title_b = data["title_b"].strip()
     except Exception as e:
-        logger.warning(f"Ollama title generation fallback ({e}). Using default templates.")
+        logger.debug(f"Ollama metadata generation skipped ({e}); using template titles.")
 
-    # Ensure titles end with #Shorts
+    # Guarantee #Shorts tag
     if "#shorts" not in title_a.lower():
         title_a = f"{title_a} #Shorts"
     if "#shorts" not in title_b.lower():
         title_b = f"{title_b} #Shorts"
 
-    links = inject_monetization_links(commentary, original_creator=clip.source_channel)
+    # Format description & pinned comment using profile templates if present
+    summary_text = clip.hook_sentence
+    if prof.description_template:
+        description = prof.description_template.format(
+            summary=summary_text,
+            original_creator=clip.source_channel,
+        )
+        pinned_comment = prof.pinned_comment_template.format(
+            original_creator=clip.source_channel,
+        )
+    else:
+        links = inject_monetization_links(commentary, original_creator=clip.source_channel)
+        description = links["description"]
+        pinned_comment = links["pinned_comment"]
 
     return {
         "title_a": title_a,
         "title_b": title_b,
-        "description": links["description"],
-        "pinned_comment": links["pinned_comment"],
-        "tags": NICHE_CONFIG.get("target_tags", ["Shorts", "Business", "Wealth"]),
-        "category_id": NICHE_CONFIG.get("category_id", "22"),
+        "description": description,
+        "pinned_comment": pinned_comment,
+        "tags": prof.target_tags or NICHE_CONFIG.get("target_tags", ["Shorts", "Gaming"]),
+        "category_id": prof.category_id or "20",
     }

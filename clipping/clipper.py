@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Autonomous YouTube Shorts Clipper, Publisher & Monetization Engine.
+Autonomous Multi-Profile YouTube Shorts Clipper, Publisher & Monetization Engine.
 CLI Entry Point.
 
 Usage:
-    python -m clipping.clipper                     # Full autonomous discovery, clip & publish
-    python -m clipping.clipper --url <URL>         # Clip specific long-form video
-    python -m clipping.clipper --dry-run           # Test full pipeline without live YouTube upload
-    python -m clipping.clipper --report            # Print weekly performance audit report
-    python -m clipping.clipper --optimize          # Run strategy optimizer feedback analysis
-    python -m clipping.clipper --poll              # Poll live view counts from YouTube Data API
+    python -m clipping.clipper --profile game-gta6           # Full autonomous GTA6 discovery, split-screen clip & publish
+    python -m clipping.clipper --profile mrbeast --url <URL> # Clip specific MrBeast challenge video with action tracking
+    python -m clipping.clipper --list-profiles               # List available niche profiles
+    python -m clipping.clipper --dry-run                     # Test full pipeline without live YouTube upload
+    python -m clipping.clipper --report                      # Print weekly performance audit report
+    python -m clipping.clipper --optimize                    # Run strategy optimizer feedback analysis
+    python -m clipping.clipper --poll                        # Poll live view counts from YouTube Data API
 """
 
 import argparse
@@ -23,6 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from clipping.orchestrator import run_pipeline
+from clipping.profiles import list_profiles, get_profile
 from clipping.strategy.weekly_report import generate_weekly_report
 from clipping.strategy.optimizer import StrategyOptimizer
 from clipping.analytics.performance_tracker import PerformanceTracker
@@ -36,7 +38,14 @@ logger = logging.getLogger("clipper")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Autonomous YouTube Shorts Monetization Engine")
+    parser = argparse.ArgumentParser(description="Autonomous Multi-Profile YouTube Shorts Monetization Engine")
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default="game-gta6",
+        help="Target profile: game-gta6 (default), game-fortnite, mrbeast, business",
+    )
+    parser.add_argument("--list-profiles", action="store_true", help="List all registered content profiles and exit.")
     parser.add_argument("--url", type=str, default=None, help="Target specific YouTube video URL.")
     parser.add_argument("--mode", type=str, default="auto", choices=["auto", "url"], help="Execution mode.")
     parser.add_argument("--dry-run", action="store_true", help="Execute pipeline without publishing live to YouTube.")
@@ -52,7 +61,15 @@ def main():
 
     args = parser.parse_args()
 
-    # Route commands
+    if args.list_profiles:
+        print("\nRegistered Clipping Profiles:")
+        for p_name in list_profiles():
+            prof = get_profile(p_name)
+            print(f"  • {prof.name:<15} -> {prof.display_name} (Layout: {prof.layout_mode})")
+        print()
+        return
+
+    # Route special commands
     if args.auth:
         from clipping.auth import authenticate_headless
         authenticate_headless()
@@ -81,7 +98,7 @@ def main():
         tracker.poll_all_clips()
         return
 
-    # Default: Run clipping pipeline
+    # Default: Run clipping pipeline with selected profile
     mode = "url" if args.url else args.mode
     run_pipeline(
         mode=mode,
@@ -91,6 +108,7 @@ def main():
         privacy=args.privacy,
         audio_mode=args.audio_mode,
         voice=args.voice,
+        profile_name=args.profile,
     )
 
 
