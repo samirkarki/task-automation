@@ -60,9 +60,15 @@ class ComplianceFilter:
         Runs candidate video through all safety gates.
         Returns (True, reason) if safe, (False, reason) if unsafe.
         """
-        # Gate 1: Deduplication (don't re-clip previously processed videos)
+        # Gate 1: Deduplication (don't re-clip previously processed videos unless it is a long stream)
         if video.video_id in self.processed:
-            return False, f"Video already processed on {self.processed[video.video_id].get('processed_at', 'earlier')}"
+            proc_entry = self.processed[video.video_id]
+            clips_done = proc_entry.get("clips_generated", 0)
+            # Long livestreams (>= 1 hour) can yield multiple clips across different runs (up to 12 clips)
+            if video.duration >= 3600 and clips_done < 12:
+                logger.info(f"Long VOD ({video.duration/3600:.1f}h) has {clips_done} previous clip(s); eligible for more unclipped highlights.")
+            else:
+                return False, f"Video already processed ({clips_done} clip(s) on {proc_entry.get('processed_at', 'earlier')})"
 
         # Gate 2: Creator Takedown Registry (respect creators who opted out)
         if video.channel_id in self.takedowns:
@@ -86,14 +92,15 @@ class ComplianceFilter:
         return True, "Passed all safety and compliance gates ✓"
 
     def register_processed(self, video_id: str, clips_count: int, metadata: Dict[str, Any] = None):
-        """Records video in processed registry to prevent re-processing."""
+        """Records video in processed registry, incrementing clip counts for long VODs."""
+        prev_clips = self.processed.get(video_id, {}).get("clips_generated", 0)
         self.processed[video_id] = {
             "processed_at": datetime.now().isoformat(),
-            "clips_generated": clips_count,
+            "clips_generated": prev_clips + clips_count,
             "metadata": metadata or {},
         }
         self._save_json(self.processed_path, self.processed)
-        logger.info(f"Registered video {video_id} with {clips_count} clip(s).")
+        logger.info(f"Registered video {video_id} with {clips_count} new clip(s) (total: {prev_clips + clips_count}).")
 
     def blacklist_channel(self, channel_id: str, reason: str = "Takedown request"):
         """Adds a channel to the permanent takedown registry."""

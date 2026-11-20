@@ -80,6 +80,7 @@ class ClipCandidate:
     commentary_angle: str = ""
     transcript_segment: str = ""
     word_segments: List[WordSegment] = field(default_factory=list)
+    is_pre_cut: bool = False
 
 
 @dataclass

@@ -137,13 +137,16 @@ def render_transformed_short(
 
     use_custom_audio = master_audio is not None and Path(master_audio).exists()
 
+    seek_time = "0.0" if clip.is_pre_cut else str(clip.start_sec)
+    facecam_sample_t = 2.0 if clip.is_pre_cut else (clip.start_sec + 2.0)
+
     # Determine layout mode
     is_split_screen = prof.layout_mode == "smart_split_screen"
 
     if is_split_screen:
         # Detect facecam coordinates
         detector = FacecamDetector()
-        facecam_coords = detector.detect_facecam_crop(source_video, sample_time_sec=clip.start_sec + 2.0)
+        facecam_coords = detector.detect_facecam_crop(source_video, sample_time_sec=facecam_sample_t)
         filter_complex = build_split_screen_filter_graph(
             facecam_coords=facecam_coords,
             split_ratio=prof.split_ratio,
@@ -154,7 +157,7 @@ def render_transformed_short(
 
         cmd = [
             "ffmpeg", "-y",
-            "-ss", str(clip.start_sec),
+            "-ss", seek_time,
             "-i", str(source_video),
         ]
         if use_custom_audio:
@@ -180,7 +183,7 @@ def render_transformed_short(
         vf_chain = build_action_crop_filter_graph(escaped_sub=escaped_sub, clean_hook=clean_hook)
         cmd = [
             "ffmpeg", "-y",
-            "-ss", str(clip.start_sec),
+            "-ss", seek_time,
             "-i", str(source_video),
         ]
         if use_custom_audio:

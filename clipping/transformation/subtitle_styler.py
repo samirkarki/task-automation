@@ -126,6 +126,7 @@ def generate_karaoke_subtitles(
     output_path: Path,
     total_duration: float = 40.0,
     profile: Optional[ClipProfile] = None,
+    start_offset: float = 0.0,
 ) -> Path:
     """
     Generates .ass subtitle file with word-by-word karaoke highlighting,
@@ -146,8 +147,8 @@ def generate_karaoke_subtitles(
 
         for chunk in chunks:
             for active_idx, active_word in enumerate(chunk):
-                w_start = active_word.start
-                w_end = active_word.end
+                w_start = max(0.0, active_word.start - start_offset)
+                w_end = max(w_start + 0.1, active_word.end - start_offset)
                 if w_end <= w_start:
                     w_end = w_start + 0.15
 

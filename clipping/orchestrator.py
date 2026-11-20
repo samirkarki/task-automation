@@ -1,8 +1,8 @@
 """
 Master Orchestrator for the Autonomous Multi-Profile YouTube Shorts Pipeline.
-Coordinates Discovery -> Multi-Signal Extraction (Heatmap + Comments + Audio Spikes) ->
-Faster-Whisper Transcription -> Contextual Boundary Expansion ->
-Smart Split-Screen / Action Framing -> Metadata Generation -> YouTube Publishing.
+Coordinates Discovery -> Lightweight Signal Extraction (Heatmap + Comments) ->
+Targeted Section Slicing (Audio & Video) -> Sub-Second Faster-Whisper Transcription ->
+Contextual Boundary Expansion -> Smart Split-Screen / Action Framing -> Publishing.
 """
 
 from datetime import datetime
@@ -18,7 +18,7 @@ from clipping.config import (
     OUTPUT_DIR,
     GDRIVE_REMOTE,
 )
-from clipping.models import VideoMeta, ClipCandidate
+from clipping.models import VideoMeta, ClipCandidate, WordSegment
 from clipping.profiles import get_profile, DEFAULT_PROFILE
 from clipping.profiles.base import ClipProfile
 from clipping.discovery.searcher import search_niche_videos
@@ -28,7 +28,10 @@ from clipping.extraction.heatmap import fetch_heatmap, find_peak_windows
 from clipping.extraction.comment_miner import extract_comment_timestamp_peaks
 from clipping.extraction.audio_peak_detector import analyze_audio_energy
 from clipping.extraction.transcriber import transcribe_audio
-from clipping.extraction.clip_selector import select_viral_clips
+from clipping.extraction.clip_selector import (
+    fuse_moment_seeds,
+    expand_clip_boundaries_contextually,
+)
 from clipping.transformation.commentary_writer import write_commentary
 from clipping.transformation.tts_narrator import generate_narration
 from clipping.transformation.subtitle_styler import generate_karaoke_subtitles
@@ -41,45 +44,92 @@ from clipping.analytics.database import AnalyticsDB
 logger = logging.getLogger("clipping.orchestrator")
 
 
-def download_source_media(video_url: str, temp_prefix: str = "source") -> Tuple[Path, Path]:
+def download_audio_section(
+    video_url: str,
+    start_sec: float,
+    end_sec: float,
+    target_path: Path,
+) -> Path:
     """
-    Downloads source audio and video streams using yt-dlp at high quality.
-    Returns: (audio_path, video_path)
+    Downloads ONLY a target audio section (e.g. 60-90s) using yt-dlp.
+    Reduces network data by 99%+ compared to downloading full multi-hour streams.
     """
     from yt_dlp import YoutubeDL
+    from yt_dlp.utils import download_range_func
 
-    audio_path = Path(f"{temp_prefix}_audio.wav")
-    video_path = Path(f"{temp_prefix}_video.mp4")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    out_tmpl = str(target_path.parent / f"{target_path.stem}_raw.%(ext)s")
 
-    # 1. Download audio stream in high-fidelity WAV (uncompressed for optimal transcription & silence detection)
-    audio_opts = {
+    opts = {
         "format": "ba/b",
-        "outtmpl": f"{temp_prefix}_audio.%(ext)s",
+        "outtmpl": out_tmpl,
+        "download_ranges": download_range_func(None, [(int(max(0, start_sec)), int(end_sec))]),
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
         "quiet": True,
         "no_warnings": True,
     }
-    with YoutubeDL(audio_opts) as ydl:
+    logger.info(f"Downloading targeted audio section [{start_sec:.0f}s - {end_sec:.0f}s]...")
+    with YoutubeDL(opts) as ydl:
         ydl.download([video_url])
 
-    # 2. Download video stream (up to 1080p 60fps)
-    video_opts = {
+    candidate = target_path.parent / f"{target_path.stem}_raw.wav"
+    if candidate.exists():
+        if target_path.exists():
+            target_path.unlink()
+        candidate.rename(target_path)
+        return target_path
+    if target_path.exists():
+        return target_path
+
+    matches = list(target_path.parent.glob(f"{target_path.stem}_raw.*"))
+    if matches:
+        matches[0].rename(target_path)
+        return target_path
+    raise RuntimeError(f"Failed to download audio section [{start_sec}-{end_sec}]")
+
+
+def download_video_section(
+    video_url: str,
+    start_sec: float,
+    end_sec: float,
+    target_path: Path,
+) -> Path:
+    """
+    Downloads ONLY the finalized 1080p video clip section (e.g. 35-50s) using yt-dlp.
+    """
+    from yt_dlp import YoutubeDL
+    from yt_dlp.utils import download_range_func
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    out_tmpl = str(target_path.parent / f"{target_path.stem}_raw.%(ext)s")
+
+    opts = {
         "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
-        "outtmpl": f"{temp_prefix}_video.%(ext)s",
+        "outtmpl": out_tmpl,
+        "download_ranges": download_range_func(None, [(int(max(0, start_sec)), int(end_sec))]),
         "merge_output_format": "mp4",
+        "force_keyframes_at_cuts": True,
         "quiet": True,
         "no_warnings": True,
     }
-    with YoutubeDL(video_opts) as ydl:
-        info = ydl.extract_info(video_url, download=True)
-        filename = ydl.prepare_filename(info)
-        base, _ = os.path.splitext(filename)
-        if os.path.exists(base + ".mp4"):
-            video_path = Path(base + ".mp4")
-        elif os.path.exists(filename):
-            video_path = Path(filename)
+    logger.info(f"Downloading finalized 1080p video section [{start_sec:.0f}s - {end_sec:.0f}s]...")
+    with YoutubeDL(opts) as ydl:
+        ydl.download([video_url])
 
-    return audio_path, video_path
+    candidate = target_path.parent / f"{target_path.stem}_raw.mp4"
+    if candidate.exists():
+        if target_path.exists():
+            target_path.unlink()
+        candidate.rename(target_path)
+        return target_path
+    if target_path.exists():
+        return target_path
+
+    matches = list(target_path.parent.glob(f"{target_path.stem}_raw.*"))
+    if matches:
+        matches[0].rename(target_path)
+        return target_path
+    raise RuntimeError(f"Failed to download video section [{start_sec}-{end_sec}]")
 
 
 def run_pipeline(
@@ -93,7 +143,8 @@ def run_pipeline(
     profile_name: Optional[str] = None,
 ) -> List[str]:
     """
-    Executes the multi-profile autonomous clipping and publishing pipeline.
+    Executes the multi-profile autonomous clipping and publishing pipeline
+    using targeted section slicing (no full-video 9GB downloads).
     """
     prof: ClipProfile = get_profile(profile_name)
 
@@ -123,7 +174,6 @@ def run_pipeline(
             custom_keywords=prof.search_keywords,
         )
 
-        # Prioritize channels on whitelist if matched
         if prof.channel_whitelist:
             whitelist_lower = [c.lower() for c in prof.channel_whitelist]
             prioritized = [v for v in candidates if any(w in v.channel.lower() for w in whitelist_lower)]
@@ -145,10 +195,10 @@ def run_pipeline(
         return []
 
     logger.info(f"-> Selected Source Video: '{target_video.title}' by {target_video.channel}")
-    logger.info(f"-> URL: {target_video.url} (Views: {target_video.view_count:,})")
+    logger.info(f"-> URL: {target_video.url} (Views: {target_video.view_count:,}, Duration: {target_video.duration/60:.1f}m)")
 
-    # Step 2: Multi-Signal Extraction - Heatmap Replay Curve
-    logger.info("[2/8] Extracting YouTube 'Most Replayed' heatmap curve...")
+    # Step 2: Multi-Signal Extraction - Heatmap Replay Curve (Zero Download)
+    logger.info("[2/8] Extracting YouTube 'Most Replayed' heatmap curve (instant)...")
     heatmap_points = fetch_heatmap(target_video.url)
     peak_windows = find_peak_windows(
         heatmap_points,
@@ -156,89 +206,135 @@ def run_pipeline(
         top_n=max(6, clips_to_generate * 2),
     )
 
-    # Step 3: Multi-Signal Extraction - Viewer Comment Timestamps & Hype Mining
-    logger.info("[3/8] Mining viewer comments for timestamp mentions & hype spikes...")
+    # Step 3: Multi-Signal Extraction - Viewer Comment Timestamps & Hype Mining (Zero Download)
+    logger.info("[3/8] Mining viewer comments for timestamp mentions & hype spikes (instant)...")
     comment_peaks = extract_comment_timestamp_peaks(target_video.url, max_comments=150)
 
-    # Step 4: Download Media & Multi-Signal Audio Peak/Silence Detection
-    logger.info("[4/8] Downloading source media in high-fidelity for audio energy analysis...")
-    prefix = f"temp_source_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    audio_path, video_path = download_source_media(target_video.url, temp_prefix=prefix)
+    # Step 4: Multi-Signal Fusion into Ranked Candidate Moment Seeds
+    logger.info("[4/8] Fusing signals into ranked candidate moment seeds...")
+    seeds = fuse_moment_seeds(
+        heatmap_peaks=peak_windows,
+        comment_peaks=comment_peaks,
+        audio_peaks=[],  # Waveform audio peaks will be evaluated on the sliced candidate windows
+        video_duration_sec=target_video.duration,
+    )
 
-    try:
-        logger.info("Analyzing audio waveform for scream/energy spikes and silence gaps...")
-        audio_analysis = analyze_audio_energy(str(audio_path))
+    # Filter out seeds that overlap with intervals already clipped from this video
+    unclipped_seeds = []
+    for s in seeds:
+        t_seed = float(s["timestamp"])
+        if db.is_interval_clipped(target_video.url, start_sec=max(0, t_seed - 20), end_sec=t_seed + 40):
+            logger.info(f"  [Skipping already-clipped segment] t={t_seed:.1f}s")
+            continue
+        unclipped_seeds.append(s)
 
-        # Step 5: Faster-Whisper GPU Transcription
-        logger.info("[5/8] Transcribing dialogue with word-level timestamps...")
-        transcript, word_segments = transcribe_audio(str(audio_path))
+    if not unclipped_seeds:
+        logger.warning("All identified viral moments for this video have already been clipped. Trying next run.")
+        return []
 
-        # Step 6: Multi-Signal Fusion & Contextual Boundary Expansion
-        logger.info(f"[6/8] Selecting top {clips_to_generate} viral segments with complete narrative arcs...")
-        selected_clips = select_viral_clips(
-            transcript=transcript,
-            heatmap_peaks=peak_windows,
-            word_segments=word_segments,
-            source_meta=target_video,
-            top_n=clips_to_generate,
-            profile=prof,
-            comment_peaks=comment_peaks,
-            audio_analysis=audio_analysis,
-        )
+    # Step 5: Process Top N Candidate Moments with Targeted Section Slicing
+    logger.info(f"[5/8] Processing top {clips_to_generate} unclipped moment(s) with targeted section slicing...")
+    processed_count = 0
 
-        if not selected_clips:
-            logger.warning("No valid clip candidates identified.")
-            return []
+    for seed_idx, seed in enumerate(unclipped_seeds):
+        if processed_count >= clips_to_generate:
+            break
 
-        # Step 7: Transformative Rendering & Subtitles
-        logger.info(f"[7/8] Rendering {len(selected_clips)} Short(s) using {prof.layout_mode} layout...")
+        t_seed = float(seed["timestamp"])
+        clip_num = processed_count + 1
+        prefix = f"slice_{target_video.video_id}_{seed_idx}_{int(t_seed)}"
+        logger.info(f"\n--- Slicing Moment {clip_num}/{clips_to_generate} (seed t={t_seed:.1f}s | Score: {seed['score']:.1f}) ---")
 
-        for idx, clip in enumerate(selected_clips):
-            clip_idx = idx + 1
-            logger.info(f"\n--- Processing Clip {clip_idx}/{len(selected_clips)} ({clip.duration:.1f}s) ---")
+        # Exploratory window for audio: 16s before seed, 48s after seed
+        slice_start = max(0.0, t_seed - 16.0)
+        slice_end = min(target_video.duration, t_seed + 48.0)
+        audio_slice_path = OUTPUT_DIR / f"{prefix}_audio.wav"
 
-            commentary = ""
-            master_audio = None
+        try:
+            # Download ONLY the ~64s audio slice (~1.5 MB)
+            download_audio_section(target_video.url, slice_start, slice_end, audio_slice_path)
 
-            if audio_mode == "soothing":
-                logger.info(f"Synthesizing soothing narration (voice='{voice}')...")
-                commentary = write_commentary(clip)
-                tts_path = OUTPUT_DIR / f"tts_narration_{clip_idx}.mp3"
-                generate_narration(commentary, tts_path, voice=voice)
-                master_audio = OUTPUT_DIR / f"master_audio_{clip_idx}.wav"
-                compose_clip_audio(tts_path, master_audio)
-                sub_source = commentary
+            # Analyze audio energy (screams & silence gaps)
+            audio_analysis = analyze_audio_energy(str(audio_slice_path))
+            silences = audio_analysis.get("silences", [])
+
+            # Transcribe ONLY this 64s audio slice with Faster-Whisper (takes ~1.5 seconds!)
+            transcript_text, word_segments = transcribe_audio(
+                str(audio_slice_path),
+                offset_seconds=slice_start,
+            )
+
+            # Contextual boundary expansion (snaps to sentence start and silence)
+            c_start, c_end = expand_clip_boundaries_contextually(
+                seed_timestamp=t_seed,
+                word_segments=word_segments,
+                silences=[(s + slice_start, e + slice_start) for s, e in silences],
+                video_duration=target_video.duration,
+                min_duration=prof.min_clip_duration,
+                max_duration=prof.max_clip_duration,
+                optimal_duration=prof.optimal_clip_duration,
+            )
+
+            clip_words = [w for w in word_segments if c_start <= w.start <= c_end]
+            clip_transcript = " ".join([w.word for w in clip_words]) if clip_words else seed.get("context", "")
+
+            # Set hook title
+            seed_context = seed.get("context", "")
+            if "💀" in seed_context or "lmao" in seed_context.lower() or "bro" in seed_context.lower():
+                hook_sentence = seed_context[:45]
+            elif prof.name == "game-gta6":
+                hook_sentence = "GTA 6 INSANE MOMENT 💀"
+            elif prof.name == "mrbeast":
+                hook_sentence = "HE ACTUALLY PULLED THIS OFF 😱"
             else:
-                logger.info("Preserving authentic streamer dialogue and audio reactions.")
-                sub_source = clip.word_segments if clip.word_segments else clip.transcript_segment
+                hook_sentence = f"{target_video.title[:35]}"
 
-            # Word-level ASS karaoke subtitles with profile typography
-            sub_path = OUTPUT_DIR / f"karaoke_subs_{clip_idx}.ass"
+            clip = ClipCandidate(
+                source_url=target_video.url,
+                source_channel=target_video.channel,
+                source_title=target_video.title,
+                start_sec=c_start,
+                end_sec=c_end,
+                duration=round(c_end - c_start, 2),
+                heatmap_score=min(float(seed["score"]) / 10.0, 1.0),
+                hook_sentence=hook_sentence,
+                commentary_angle=f"Stream highlight from {target_video.channel}",
+                transcript_segment=clip_transcript,
+                word_segments=clip_words,
+                is_pre_cut=True,
+            )
+
+            # Step 6: Download ONLY the finalized 1080p video clip section (~15 MB)
+            video_slice_path = OUTPUT_DIR / f"{prefix}_video.mp4"
+            download_video_section(target_video.url, c_start, c_end, video_slice_path)
+
+            # Step 7: Subtitles & Transformative Rendering
+            logger.info(f"[6/8] Rendering Short #{clip_num} [{prof.layout_mode}] ({clip.duration:.1f}s)...")
+            sub_path = OUTPUT_DIR / f"karaoke_subs_{clip_num}.ass"
             generate_karaoke_subtitles(
-                word_segments_or_text=sub_source,
+                word_segments_or_text=clip.word_segments if clip.word_segments else clip.transcript_segment,
                 output_path=sub_path,
                 total_duration=clip.duration,
                 profile=prof,
+                start_offset=clip.start_sec,
             )
 
-            # Render 1080x1920 Short (Smart Split-Screen / Action Framing)
-            short_path = OUTPUT_DIR / f"short_clip_{clip_idx}.mp4"
+            short_path = OUTPUT_DIR / f"short_clip_{clip_num}.mp4"
             render_transformed_short(
-                source_video=video_path,
+                source_video=video_slice_path,
                 clip=clip,
-                master_audio=master_audio,
+                master_audio=None,
                 subtitle_file=sub_path,
                 hook_title=clip.hook_sentence,
                 output_path=short_path,
                 profile=prof,
             )
 
-            # Metadata generation
-            metadata = generate_metadata(clip, commentary, profile=prof)
-            ab_variant = "A" if clip_idx % 2 != 0 else "B"
+            # Step 8: Metadata & Multi-Platform Publishing
+            metadata = generate_metadata(clip, "", profile=prof)
+            ab_variant = "A" if clip_num % 2 != 0 else "B"
 
-            # Step 8: Multi-Platform Publishing
-            logger.info(f"[8/8] Syndicating to platforms [Variant {ab_variant}]...")
+            logger.info(f"[7/8] Syndicating to platforms [Variant {ab_variant}]...")
             pub_results = publish_to_all_platforms(
                 video_path=short_path,
                 metadata=metadata,
@@ -248,47 +344,52 @@ def run_pipeline(
             )
 
             yt_url = pub_results.get("youtube")
+            vid_id = yt_url.split("/")[-1] if yt_url else f"local_{int(t_seed)}"
+            chosen_title = metadata["title_a"] if ab_variant == "A" else metadata["title_b"]
 
             if yt_url:
                 published_urls.append(yt_url)
-                vid_id = yt_url.split("/")[-1]
-                chosen_title = metadata["title_a"] if ab_variant == "A" else metadata["title_b"]
 
-                db.insert_clip(
-                    video_id=vid_id,
-                    video_url=yt_url,
-                    source_url=target_video.url,
-                    source_channel=target_video.channel,
-                    title=chosen_title,
-                    title_variant=ab_variant,
-                    clip_duration=clip.duration,
-                    heatmap_score=clip.heatmap_score,
-                    commentary_length=len(commentary.split()) if commentary else 0,
-                )
+            # Record in SQLite database with interval tracking
+            db.insert_clip(
+                video_id=vid_id,
+                video_url=yt_url or f"https://youtube.com/shorts/{vid_id}",
+                source_url=target_video.url,
+                source_channel=target_video.channel,
+                title=chosen_title,
+                title_variant=ab_variant,
+                clip_duration=clip.duration,
+                start_sec=clip.start_sec,
+                end_sec=clip.end_sec,
+                heatmap_score=clip.heatmap_score,
+                commentary_length=0,
+            )
+            processed_count += 1
 
-        # Mark source video as processed
-        compliance.register_processed(target_video.video_id, len(selected_clips))
+        except Exception as e:
+            logger.error(f"Error processing clip seed at {t_seed:.1f}s: {e}", exc_info=True)
+        finally:
+            # Clean up temporary sliced files
+            for p in [audio_slice_path, OUTPUT_DIR / f"{prefix}_video.mp4"]:
+                if p and p.exists():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
 
-        # Cloud sync via rclone
-        if published_urls and not dry_run:
-            logger.info(f"Syncing generated clips to cloud ({GDRIVE_REMOTE})...")
-            try:
-                subprocess.run(["rclone", "copy", str(OUTPUT_DIR), GDRIVE_REMOTE, "-v"], capture_output=True, text=True)
-                logger.info("Clips successfully synced.")
-            except Exception as e:
-                logger.warning(f"rclone sync warning: {e}")
+    # Mark video in compliance filter with count of generated clips
+    compliance.register_processed(target_video.video_id, processed_count)
 
-    finally:
-        # Cleanup temporary source media
-        logger.info("Cleaning up temporary source media files...")
-        for p in [audio_path, video_path]:
-            if p and p.exists():
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
+    # Cloud sync via rclone if configured
+    if published_urls and not dry_run:
+        logger.info(f"Syncing generated clips to cloud ({GDRIVE_REMOTE})...")
+        try:
+            subprocess.run(["rclone", "copy", str(OUTPUT_DIR), GDRIVE_REMOTE, "-v"], capture_output=True, text=True)
+            logger.info("Clips successfully synced.")
+        except Exception as e:
+            logger.warning(f"rclone sync warning: {e}")
 
     logger.info("=================================================================")
-    logger.info(f"PIPELINE COMPLETE: {len(published_urls)} Short(s) processed for [{prof.display_name}].")
+    logger.info(f"PIPELINE COMPLETE: {processed_count} Short(s) generated for [{prof.display_name}].")
     logger.info("=================================================================")
     return published_urls

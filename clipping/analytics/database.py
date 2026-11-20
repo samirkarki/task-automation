@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 import sqlite3
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from clipping.config import DATA_DIR
 
@@ -40,6 +40,8 @@ class AnalyticsDB:
                     title TEXT NOT NULL,
                     title_variant TEXT DEFAULT 'A',
                     clip_duration REAL,
+                    start_sec REAL DEFAULT 0.0,
+                    end_sec REAL DEFAULT 0.0,
                     heatmap_score REAL DEFAULT 0.0,
                     commentary_length INTEGER DEFAULT 0,
                     views_1h INTEGER DEFAULT 0,
@@ -69,19 +71,30 @@ class AnalyticsDB:
         title: str,
         title_variant: str = "A",
         clip_duration: float = 40.0,
+        start_sec: float = 0.0,
+        end_sec: float = 0.0,
         heatmap_score: float = 0.0,
         commentary_length: int = 0,
         estimated_rpm: float = 0.20,
     ):
         conn = self._get_connection()
         try:
+            # Auto-migrate table columns if missing
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(clips)")
+            cols = [col[1] for col in cursor.fetchall()]
+            if "start_sec" not in cols:
+                conn.execute("ALTER TABLE clips ADD COLUMN start_sec REAL DEFAULT 0.0")
+            if "end_sec" not in cols:
+                conn.execute("ALTER TABLE clips ADD COLUMN end_sec REAL DEFAULT 0.0")
+
             conn.execute(
                 """
                 INSERT OR REPLACE INTO clips (
                     video_id, video_url, source_url, source_channel, title,
-                    title_variant, clip_duration, heatmap_score, commentary_length,
-                    estimated_rpm
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    title_variant, clip_duration, start_sec, end_sec, heatmap_score,
+                    commentary_length, estimated_rpm
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     video_id,
@@ -91,6 +104,8 @@ class AnalyticsDB:
                     title,
                     title_variant,
                     clip_duration,
+                    start_sec,
+                    end_sec,
                     heatmap_score,
                     commentary_length,
                     estimated_rpm,
@@ -100,6 +115,40 @@ class AnalyticsDB:
             logger.info(f"Recorded clip in analytics database: {video_id} ('{title[:30]}...')")
         finally:
             conn.close()
+
+    def get_clipped_intervals(self, source_url: str) -> List[Tuple[float, float]]:
+        """Returns list of (start_sec, end_sec) intervals already clipped from this source URL."""
+        conn = self._get_connection()
+        try:
+            # Check if columns exist
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(clips)")
+            cols = [col[1] for col in cursor.fetchall()]
+            if "start_sec" not in cols or "end_sec" not in cols:
+                return []
+
+            rows = conn.execute(
+                "SELECT start_sec, end_sec FROM clips WHERE source_url = ?",
+                (source_url,),
+            ).fetchall()
+            return [(float(r["start_sec"]), float(r["end_sec"])) for r in rows if r["end_sec"] > 0]
+        finally:
+            conn.close()
+
+    def is_interval_clipped(
+        self,
+        source_url: str,
+        start_sec: float,
+        end_sec: float,
+        buffer_sec: float = 20.0,
+    ) -> bool:
+        """Checks if a proposed interval overlaps with an already-clipped segment."""
+        intervals = self.get_clipped_intervals(source_url)
+        for s, e in intervals:
+            # If proposed interval overlaps within buffer_sec
+            if not (end_sec < (s - buffer_sec) or start_sec > (e + buffer_sec)):
+                return True
+        return False
 
     def update_metrics(
         self,
