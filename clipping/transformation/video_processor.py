@@ -40,6 +40,79 @@ def escape_ffmpeg_path(path: Path) -> str:
     return p_str
 
 
+def build_floating_pip_filter_graph(
+    facecam_coords: Dict[str, Any],
+    escaped_sub: str,
+    clean_hook: str,
+    border_color: str = "0x00FFFF",  # Cyan accent default (0xFFFF00 for Fortnite)
+    gameplay_y: int = 360,
+    pip_x: int = 50,
+    pip_y: int = 1420,
+    pip_w: int = 340,
+    pip_h: int = 255,
+) -> str:
+    """
+    Constructs an FFmpeg filter_complex graph for Floating Corner PiP:
+      1. Background: Sourced from gameplay, scaled to 1080x1920 with boxblur=25:5 and -15% brightness.
+      2. Foreground: Uncropped 16:9 gameplay scaled to 1080x608, placed at gameplay_y (default 360).
+      3. Streamer PiP (when has_facecam is True):
+         - Cropped to streamer quadrant, scaled to pip_w x pip_h (default 340x255).
+         - Overlaid at bottom-left pip_x, pip_y (default x=50, y=1420) with a 3px neon border.
+         - Substantially marginalized (~15% of screen), leaving gameplay uncompromised!
+      4. Zero Empty-Box Fallback (when has_facecam is False):
+         - Webcam badge is completely omitted! Renders full-screen gameplay with ambient blur.
+      5. Subtitles & Hook:
+         - Word-by-word karaoke subtitles centered at y ≈ 1160 (safe from PiP and center gameplay).
+         - Curiosity hook banner at top (y=180, first 3.8s).
+    """
+    has_cam = facecam_coords.get("has_facecam", False)
+    fx = facecam_coords.get("x", 0)
+    fy = facecam_coords.get("y", 0)
+    fw = facecam_coords.get("w", 0)
+    fh = facecam_coords.get("h", 0)
+
+    # Subtitle and hook overlay filter chain
+    sub_and_hook = (
+        f"subtitles='{escaped_sub}',"
+        f"drawtext=text='{clean_hook}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.7:boxborderw=18:"
+        f"x=(w-text_w)/2:y=180:enable='between(t,0,3.8)'[vout]"
+    )
+
+    if has_cam and fw > 0 and fh > 0:
+        fc_filter = (
+            f"[0:v]split=3[bg_src][game_src][cam_src];"
+            # Background ambient blur
+            f"[bg_src]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+            f"boxblur=25:5,eq=brightness=-0.15[bg_blur];"
+            # Uncropped 16:9 gameplay
+            f"[game_src]scale=1080:608:force_original_aspect_ratio=decrease,"
+            f"hue=h={COLOR_GRADE_HUE_SHIFT}:s={COLOR_GRADE_SAT_BOOST}[game_sharp];"
+            # Overlay gameplay in upper-mid
+            f"[bg_blur][game_sharp]overlay=0:{gameplay_y}[base];"
+            # Streamer reaction PiP badge with neon border
+            f"[cam_src]crop={fw}:{fh}:{fx}:{fy},scale={pip_w}:{pip_h},"
+            f"drawbox=x=0:y=0:w={pip_w}:h={pip_h}:color={border_color}@0.95:t=3,hue=s=1.06[cam_badge];"
+            # Overlay streamer PiP in bottom-left corner
+            f"[base][cam_badge]overlay={pip_x}:{pip_y}[comp];"
+            f"[comp]{sub_and_hook}"
+        )
+    else:
+        fc_filter = (
+            f"[0:v]split=2[bg_src][game_src];"
+            # Background ambient blur
+            f"[bg_src]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+            f"boxblur=25:5,eq=brightness=-0.15[bg_blur];"
+            # Uncropped 16:9 gameplay
+            f"[game_src]scale=1080:608:force_original_aspect_ratio=decrease,"
+            f"hue=h={COLOR_GRADE_HUE_SHIFT}:s={COLOR_GRADE_SAT_BOOST}[game_sharp];"
+            # Overlay gameplay in upper-mid
+            f"[bg_blur][game_sharp]overlay=0:{gameplay_y}[base];"
+            # Burn animated subtitles + hook banner directly on base
+            f"[base]{sub_and_hook}"
+        )
+    return fc_filter
+
+
 def build_split_screen_filter_graph(
     facecam_coords: Dict[str, Any],
     split_ratio: float,
@@ -48,47 +121,18 @@ def build_split_screen_filter_graph(
     divider_color: str = "0x00FFFF",  # Cyan accent for divider
 ) -> str:
     """
-    Constructs an FFmpeg filter_complex graph for Smart Split-Screen:
-      [0:v] split into [cam_in] and [game_in]
-      [cam_in] cropped to facecam, scaled to 1080:top_h -> [cam_out]
-      [game_in] center-cropped to gameplay, scaled to 1080:bottom_h -> [game_out]
-      [cam_out][game_out] vstack -> [stacked]
-      [stacked] add neon divider + burn subtitles + hook banner -> [vout]
+    Backwards compatibility alias for build_floating_pip_filter_graph.
+    Directs split-screen rendering to the upgraded Floating Corner PiP layout.
     """
-    total_h = 1920
-    top_h = int(round(total_h * split_ratio))
-    # Ensure even dimensions for libx264
-    if top_h % 2 != 0:
-        top_h += 1
-    bottom_h = total_h - top_h
-
-    fx = facecam_coords.get("x", 1440)
-    fy = facecam_coords.get("y", 680)
-    fw = facecam_coords.get("w", 480)
-    fh = facecam_coords.get("h", 400)
-
-    # Divider bar thickness: 6px
-    div_y = top_h - 3
-
-    # Build filter complex
-    fc_filter = (
-        f"[0:v]split=2[cam_raw][game_raw];"
-        # Facecam branch: crop to facecam box, scale to 1080:top_h, slight saturation boost
-        f"[cam_raw]crop={fw}:{fh}:{fx}:{fy},scale=1080:{top_h}:force_original_aspect_ratio=increase,"
-        f"crop=1080:{top_h},hue=s=1.06[cam_out];"
-        # Gameplay branch: centered crop, scale to 1080:bottom_h
-        f"[game_raw]crop=ih*(1080/{bottom_h}):ih,scale=1080:{bottom_h},hue=h={COLOR_GRADE_HUE_SHIFT}:s={COLOR_GRADE_SAT_BOOST}[game_out];"
-        # Stack vertically
-        f"[cam_out][game_out]vstack=inputs=2[stacked];"
-        # Neon divider line
-        f"[stacked]drawbox=x=0:y={div_y}:w=1080:h=6:color={divider_color}@0.95:t=fill,"
-        # Burn animated karaoke subtitles
-        f"subtitles='{escaped_sub}',"
-        # Curiosity hook title banner at top (first 3.8s)
-        f"drawtext=text='{clean_hook}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.7:boxborderw=18:"
-        f"x=(w-text_w)/2:y=180:enable='between(t,0,3.8)'[vout]"
+    coords = dict(facecam_coords)
+    if "has_facecam" not in coords:
+        coords["has_facecam"] = coords.get("w", 0) > 0 and coords.get("h", 0) > 0
+    return build_floating_pip_filter_graph(
+        facecam_coords=coords,
+        escaped_sub=escaped_sub,
+        clean_hook=clean_hook,
+        border_color=divider_color,
     )
-    return fc_filter
 
 
 def build_action_crop_filter_graph(
@@ -141,18 +185,17 @@ def render_transformed_short(
     facecam_sample_t = 2.0 if clip.is_pre_cut else (clip.start_sec + 2.0)
 
     # Determine layout mode
-    is_split_screen = prof.layout_mode == "smart_split_screen"
+    is_split_screen = prof.layout_mode in ("smart_split_screen", "floating_pip")
 
     if is_split_screen:
-        # Detect facecam coordinates
+        # Detect facecam coordinates with multi-corner consensus
         detector = FacecamDetector()
         facecam_coords = detector.detect_facecam_crop(source_video, sample_time_sec=facecam_sample_t)
-        filter_complex = build_split_screen_filter_graph(
+        filter_complex = build_floating_pip_filter_graph(
             facecam_coords=facecam_coords,
-            split_ratio=prof.split_ratio,
             escaped_sub=escaped_sub,
             clean_hook=clean_hook,
-            divider_color="0x00FFFF" if prof.name == "game-gta6" else "0xFFFF00",
+            border_color="0x00FFFF" if prof.name == "game-gta6" else "0xFFFF00",
         )
 
         cmd = [

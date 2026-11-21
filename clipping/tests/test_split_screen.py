@@ -1,5 +1,5 @@
 """
-Unit tests for Split-Screen Framing, Facecam Detection & Subtitle Styling.
+Unit tests for Split-Screen / Floating PiP Framing, Multi-Corner Facecam Detection & Subtitle Styling.
 """
 
 import tempfile
@@ -8,6 +8,7 @@ from pathlib import Path
 
 from clipping.transformation.facecam_detector import FacecamDetector
 from clipping.transformation.video_processor import (
+    build_floating_pip_filter_graph,
     build_split_screen_filter_graph,
     build_action_crop_filter_graph,
 )
@@ -20,16 +21,79 @@ from clipping.models import WordSegment
 
 
 class TestSplitScreen(unittest.TestCase):
-    def test_facecam_detector_preset(self):
+    def test_facecam_detector_no_file(self):
+        """Verifies zero empty-box guarantee when no video or frame can be loaded."""
         detector = FacecamDetector()
         res = detector.detect_facecam_crop("non_existent_file.mp4")
-        self.assertIn("x", res)
-        self.assertIn("y", res)
-        self.assertIn("w", res)
-        self.assertIn("h", res)
-        self.assertGreater(res["confidence"], 0.5)
+        self.assertFalse(res["has_facecam"])
+        self.assertEqual(res["confidence"], 0.0)
+        self.assertEqual(res["quadrant"], "none")
 
-    def test_split_screen_filter_syntax(self):
+    def test_facecam_detector_real_samples(self):
+        """Verifies multi-corner consensus detection on real streamer footage (CarryMinati top-right)."""
+        detector = FacecamDetector()
+        sample_path = Path("C:/Users/Samir/.gemini/antigravity/brain/ec7ae901-da51-43f9-b0bc-1dc30a5934da/scratch/source_samples/source_13652.jpg")
+        if sample_path.exists():
+            res = detector.detect_facecam_crop(sample_path)
+            self.assertTrue(res["has_facecam"])
+            self.assertEqual(res["quadrant"], "top_right")
+            self.assertGreater(res["confidence"], 0.5)
+
+    def test_floating_pip_filter_with_facecam(self):
+        """Verifies Floating Corner PiP filter graph when streamer webcam is detected."""
+        facecam_coords = {
+            "has_facecam": True,
+            "x": 1280,
+            "y": 0,
+            "w": 480,
+            "h": 360,
+            "quadrant": "top_right",
+            "confidence": 0.85,
+        }
+        graph = build_floating_pip_filter_graph(
+            facecam_coords=facecam_coords,
+            escaped_sub="subs.ass",
+            clean_hook="GTA 6 EPIC MOMENT",
+            border_color="0x00FFFF",
+        )
+        # Background blur & gameplay
+        self.assertIn("split=3[bg_src][game_src][cam_src]", graph)
+        self.assertIn("boxblur=25:5", graph)
+        self.assertIn("overlay=0:360[base]", graph)
+        # Floating badge in bottom-left corner with neon border
+        self.assertIn("crop=480:360:1280:0", graph)
+        self.assertIn("scale=340:255", graph)
+        self.assertIn("drawbox=x=0:y=0:w=340:h=255:color=0x00FFFF@0.95:t=3", graph)
+        self.assertIn("overlay=50:1420[comp]", graph)
+        # Subtitles and hook banner
+        self.assertIn("subtitles='subs.ass'", graph)
+        self.assertIn("drawtext=text='GTA 6 EPIC MOMENT'", graph)
+
+    def test_floating_pip_filter_zero_empty_box_fallback(self):
+        """Verifies that when no webcam is detected, the floating badge is omitted completely."""
+        facecam_coords = {
+            "has_facecam": False,
+            "x": 0,
+            "y": 0,
+            "w": 0,
+            "h": 0,
+            "quadrant": "none",
+            "confidence": 0.0,
+        }
+        graph = build_floating_pip_filter_graph(
+            facecam_coords=facecam_coords,
+            escaped_sub="subs.ass",
+            clean_hook="NO WEBCAM GAMEPLAY",
+        )
+        # Only 2-way split: background blur + uncropped gameplay
+        self.assertIn("split=2[bg_src][game_src]", graph)
+        self.assertNotIn("cam_src", graph)
+        self.assertNotIn("overlay=50:1420", graph)
+        self.assertIn("overlay=0:360[base]", graph)
+        self.assertIn("[base]subtitles='subs.ass'", graph)
+
+    def test_legacy_split_screen_alias(self):
+        """Verifies backwards compatibility wrapper build_split_screen_filter_graph."""
         facecam_coords = {"x": 1440, "y": 680, "w": 480, "h": 400}
         graph = build_split_screen_filter_graph(
             facecam_coords=facecam_coords,
@@ -38,11 +102,9 @@ class TestSplitScreen(unittest.TestCase):
             clean_hook="GTA 6 EPIC MOMENT",
             divider_color="0x00FFFF",
         )
-        self.assertIn("vstack", graph)
-        self.assertIn("drawbox", graph)
-        self.assertIn("subtitles=", graph)
-        self.assertIn("drawtext=", graph)
-        self.assertIn("crop=480:400:1440:680", graph)
+        self.assertIn("boxblur=25:5", graph)
+        self.assertIn("overlay=50:1420", graph)
+        self.assertIn("subtitles='subs.ass'", graph)
 
     def test_action_crop_filter_syntax(self):
         vf = build_action_crop_filter_graph(
@@ -58,6 +120,7 @@ class TestSplitScreen(unittest.TestCase):
         header = build_ass_header(prof)
         self.assertIn("Montserrat ExtraBold", header)
         self.assertIn("&H0000FFFF", header)  # Yellow highlight
+        self.assertIn(",720,1", header)      # Calibrated 720 vertical margin for floating PiP
 
         with tempfile.TemporaryDirectory() as tmpdir:
             out_ass = Path(tmpdir) / "test.ass"

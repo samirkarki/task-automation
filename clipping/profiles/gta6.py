@@ -46,7 +46,7 @@ GTA6_PROFILE = ClipProfile(
         "outline_width": 4.5,
         "shadow_depth": 2.5,
         "animation": "bounce",
-        "vertical_margin": 640,
+        "vertical_margin": 720,
     },
     target_tags=[
         "GTA6", "GTA6Gameplay", "GTA6Leaks", "GTA6Trailer", "GrandTheftAuto6",

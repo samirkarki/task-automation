@@ -39,8 +39,9 @@ def build_ass_header(profile: Optional[ClipProfile] = None) -> str:
     outline_w = style.get("outline_width", 4.5)
     shadow_d = style.get("shadow_depth", 2.5)
 
-    # In split-screen mode, vertical margin sits right at the divider boundary (y ≈ 680)
-    default_margin_v = 640 if (profile and profile.layout_mode == "smart_split_screen") else 680
+    # For floating PiP / split-screen, vertical margin of 720 places captions centered at y ≈ 1160
+    # (comfortably below center gameplay ending at y=968 and above bottom-left PiP at y=1420)
+    default_margin_v = 720 if (profile and profile.layout_mode in ("smart_split_screen", "floating_pip")) else 680
     margin_v = style.get("vertical_margin", default_margin_v)
 
     header = f"""[Script Info]

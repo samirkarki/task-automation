@@ -42,7 +42,7 @@ FORTNITE_PROFILE = ClipProfile(
         "outline_width": 4.5,
         "shadow_depth": 2.5,
         "animation": "bounce",
-        "vertical_margin": 640,
+        "vertical_margin": 720,
     },
     target_tags=[
         "Fortnite", "FortniteClips", "FortniteHighlights", "GamingShorts",
