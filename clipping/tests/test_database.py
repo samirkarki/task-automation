@@ -67,6 +67,50 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(variants["A"]["avg_views"], 50000.0)
         self.assertEqual(variants["B"]["avg_views"], 20000.0)
 
+    def test_interval_clipping_with_type_coercion(self):
+        """Verifies that is_interval_clipped and get_clipped_intervals tolerate bytes/None/str gracefully."""
+        # Insert a normal clip
+        self.db.insert_clip(
+            video_id="CLIP_INT_1",
+            video_url="https://youtube.com/shorts/CLIP_INT_1",
+            source_url="https://youtube.com/watch?v=STREAM_VOD",
+            source_channel="Gamer Channel",
+            title="Epic Moment 1",
+            start_sec=100.0,
+            end_sec=150.0,
+        )
+
+        # Manually insert rows with bytes/None into sqlite to simulate corrupt/legacy database rows
+        conn = self.db._get_connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO clips (video_id, video_url, source_url, title, start_sec, end_sec)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("CORRUPT_BYTES", "http://x", "https://youtube.com/watch?v=STREAM_VOD", "Test", b"200.0", b"250.0"),
+            )
+            conn.execute(
+                """
+                INSERT INTO clips (video_id, video_url, source_url, title, start_sec, end_sec)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("CORRUPT_NONE", "http://y", "https://youtube.com/watch?v=STREAM_VOD", "Test", None, None),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # get_clipped_intervals should safely parse both normal and bytes rows without TypeError
+        intervals = self.db.get_clipped_intervals("https://youtube.com/watch?v=STREAM_VOD")
+        self.assertIn((100.0, 150.0), intervals)
+        self.assertIn((200.0, 250.0), intervals)
+
+        # is_interval_clipped should work smoothly
+        self.assertTrue(self.db.is_interval_clipped("https://youtube.com/watch?v=STREAM_VOD", 110.0, 140.0))
+        self.assertTrue(self.db.is_interval_clipped("https://youtube.com/watch?v=STREAM_VOD", 210.0, 240.0))
+        self.assertFalse(self.db.is_interval_clipped("https://youtube.com/watch?v=STREAM_VOD", 500.0, 540.0))
+
 
 if __name__ == "__main__":
     unittest.main()

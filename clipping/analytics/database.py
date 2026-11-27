@@ -103,18 +103,35 @@ class AnalyticsDB:
                     source_channel,
                     title,
                     title_variant,
-                    clip_duration,
-                    start_sec,
-                    end_sec,
-                    heatmap_score,
-                    commentary_length,
-                    estimated_rpm,
+                    self._safe_float(clip_duration),
+                    self._safe_float(start_sec),
+                    self._safe_float(end_sec),
+                    self._safe_float(heatmap_score),
+                    int(commentary_length or 0),
+                    self._safe_float(estimated_rpm),
                 ),
             )
             conn.commit()
             logger.info(f"Recorded clip in analytics database: {video_id} ('{title[:30]}...')")
         finally:
             conn.close()
+
+    @staticmethod
+    def _safe_float(val: Any) -> float:
+        """Safely converts database values (bytes, str, None, numbers) to float."""
+        if val is None:
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, bytes):
+            try:
+                return float(val.decode("utf-8", errors="ignore"))
+            except Exception:
+                return 0.0
+        try:
+            return float(str(val))
+        except Exception:
+            return 0.0
 
     def get_clipped_intervals(self, source_url: str) -> List[Tuple[float, float]]:
         """Returns list of (start_sec, end_sec) intervals already clipped from this source URL."""
@@ -131,7 +148,17 @@ class AnalyticsDB:
                 "SELECT start_sec, end_sec FROM clips WHERE source_url = ?",
                 (source_url,),
             ).fetchall()
-            return [(float(r["start_sec"]), float(r["end_sec"])) for r in rows if r["end_sec"] > 0]
+
+            intervals: List[Tuple[float, float]] = []
+            for r in rows:
+                try:
+                    s = self._safe_float(r["start_sec"])
+                    e = self._safe_float(r["end_sec"])
+                    if e > 0.0:
+                        intervals.append((s, e))
+                except Exception:
+                    continue
+            return intervals
         finally:
             conn.close()
 
