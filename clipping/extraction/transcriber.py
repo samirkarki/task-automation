@@ -64,6 +64,7 @@ def transcribe_audio(
     device: str = WHISPER_DEVICE,
     compute_type: str = WHISPER_COMPUTE_TYPE,
     offset_seconds: float = 0.0,
+    task: str = "translate",
 ) -> Tuple[str, List[WordSegment]]:
     """
     Transcribes audio using faster-whisper.
@@ -95,6 +96,7 @@ def transcribe_audio(
             audio_path,
             beam_size=5,
             word_timestamps=True,
+            task=task,
         )
         segments = list(segments_gen)
     except Exception as err:
@@ -105,6 +107,7 @@ def transcribe_audio(
                 waveform,
                 beam_size=5,
                 word_timestamps=True,
+                task=task,
             )
             segments = list(segments_gen)
         else:

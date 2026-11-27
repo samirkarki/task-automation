@@ -21,22 +21,30 @@ class FacecamDetector:
 
     def __init__(self):
         self._cv2 = None
-        self._face_detector = None
+        self._yunet_path = None
         self._init_detector()
 
     def _init_detector(self):
         try:
             import cv2
             self._cv2 = cv2
-            # Check for modern YuNet or Haar cascade
-            if hasattr(cv2, "CascadeClassifier") and hasattr(cv2, "data"):
-                cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-                self._face_detector = cv2.CascadeClassifier(cascade_path)
-                logger.debug("Initialized OpenCV Haar cascade.")
+            
+            yunet_path = Path(__file__).parent.parent / "data" / "yunet.onnx"
+            if not yunet_path.exists():
+                yunet_path.parent.mkdir(parents=True, exist_ok=True)
+                url = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+                logger.info(f"Downloading YuNet DNN face detector model to {yunet_path}...")
+                import urllib.request
+                urllib.request.urlretrieve(url, yunet_path)
+            
+            if yunet_path.exists() and hasattr(cv2, "FaceDetectorYN"):
+                self._yunet_path = yunet_path
+                logger.debug(f"YuNet DNN face detector initialized from {yunet_path}.")
             else:
-                logger.debug("Haar cascade not available in this OpenCV build; using skin-motion analyzer.")
+                self._yunet_path = None
         except Exception as e:
-            logger.debug(f"OpenCV face detector init notice: {e}")
+            logger.debug(f"YuNet DNN init notice: {e}. Falling back to skin plausibility analyzer.")
+            self._yunet_path = None
 
     def _extract_corner_quadrants(
         self,
@@ -149,7 +157,91 @@ class FacecamDetector:
                 "confidence": 0.0,
             }
 
-        # Quadrant scores accumulator: {q_name: {"skin": [], "motion": [], "coords": (...)}}
+        # --- Tier 1: YuNet Deep Neural Network Face Detection ---
+        if self._yunet_path is not None and len(frames) > 0:
+            corner_votes: Dict[str, List[float]] = {
+                "top_left": [],
+                "top_right": [],
+                "bottom_left": [],
+                "bottom_right": [],
+            }
+            ref_h, ref_w = frames[0].shape[:2]
+
+            try:
+                detector = self._cv2.FaceDetectorYN.create(
+                    str(self._yunet_path), "", (ref_w, ref_h), score_threshold=0.55
+                )
+
+                for frame in frames:
+                    fh, fw = frame.shape[:2]
+                    detector.setInputSize((fw, fh))
+                    _, faces = detector.detect(frame)
+                    if faces is not None:
+                        for f in faces:
+                            fx, fy, f_w, f_h, conf = int(f[0]), int(f[1]), int(f[2]), int(f[3]), float(f[-1])
+                            cx = fx + f_w // 2
+                            cy = fy + f_h // 2
+
+                            # Identify which corner quadrant the face belongs to
+                            quad = None
+                            if cy < fh * 0.45:
+                                if cx > fw * 0.58:
+                                    quad = "top_right"
+                                elif cx < fw * 0.42:
+                                    quad = "top_left"
+                            elif cy > fh * 0.55:
+                                if cx > fw * 0.58:
+                                    quad = "bottom_right"
+                                elif cx < fw * 0.42:
+                                    quad = "bottom_left"
+
+                            if quad and conf >= 0.60:
+                                corner_votes[quad].append(conf)
+
+                # Check if any corner quadrant has persistent facial detections
+                best_quadrant = None
+                best_conf = 0.0
+                max_votes = 0
+
+                for quad, confs in corner_votes.items():
+                    if len(confs) > max_votes and np.mean(confs) >= 0.60:
+                        max_votes = len(confs)
+                        best_quadrant = quad
+                        best_conf = float(np.mean(confs))
+
+                # Require at least 2 detections (or 1 if only 1 frame was provided)
+                min_required = 1 if len(frames) <= 2 else 2
+                if best_quadrant and max_votes >= min_required:
+                    qw = int(ref_w * 0.32)
+                    qh = int(ref_h * 0.36)
+                    if best_quadrant == "top_right":
+                        qx, qy = ref_w - qw, 0
+                    elif best_quadrant == "top_left":
+                        qx, qy = 0, 0
+                    elif best_quadrant == "bottom_right":
+                        qx, qy = ref_w - qw, ref_h - qh
+                    else:  # bottom_left
+                        qx, qy = 0, ref_h - qh
+
+                    logger.info(
+                        f"[YuNet DNN] Streamer facecam detected in [{best_quadrant}] at x={qx}, y={qy}, w={qw}, h={qh} "
+                        f"({max_votes}/{len(frames)} frames, confidence={best_conf:.2f})"
+                    )
+                    return {
+                        "has_facecam": True,
+                        "x": qx,
+                        "y": qy,
+                        "w": qw,
+                        "h": qh,
+                        "quadrant": best_quadrant,
+                        "confidence": round(best_conf, 2),
+                    }
+                else:
+                    logger.debug("[YuNet DNN] No persistent facecam detected in corner quadrants.")
+            except Exception as e:
+                logger.warning(f"YuNet DNN detection encountered notice: {e}. Falling back to skin plausibility.")
+
+        # --- Tier 2: Skin-Tone Plausibility & Motion Variance Fallback ---
         quadrant_names = ["top_left", "top_right", "bottom_left", "bottom_right"]
         q_scores: Dict[str, Dict[str, Any]] = {
             q: {"skin": [], "motion": [], "coords": None} for q in quadrant_names
@@ -163,11 +255,9 @@ class FacecamDetector:
                 if q_scores[q_name]["coords"] is None:
                     q_scores[q_name]["coords"] = (qx, qy, qw, qh)
 
-                # 1. Skin tone density
                 skin_ratio = self._score_skin_tone(q_crop)
                 q_scores[q_name]["skin"].append(skin_ratio)
 
-                # 2. Inter-frame motion variance
                 if q_name in prev_crops:
                     gray_curr = self._cv2.cvtColor(q_crop, self._cv2.COLOR_BGR2GRAY)
                     gray_prev = self._cv2.cvtColor(prev_crops[q_name], self._cv2.COLOR_BGR2GRAY)
@@ -176,10 +266,6 @@ class FacecamDetector:
 
                 prev_crops[q_name] = q_crop
 
-        # Aggregate quadrant composite scores
-        # Streamer webcam profile:
-        # - Substantial skin tone density (typically 3% - 25% of quadrant area)
-        # - Continuous natural human motion (delta between 1.0 and 20.0, unlike static game HUDs)
         best_quadrant = None
         best_score = -1.0
         best_coords = (0, 0, 0, 0)
@@ -188,11 +274,17 @@ class FacecamDetector:
             mean_skin = float(np.mean(data["skin"])) if data["skin"] else 0.0
             mean_motion = float(np.mean(data["motion"])) if data["motion"] else 0.0
 
-            # Score formula: Skin density is primary; motion variance confirms it's not a static HUD element
+            # CRITICAL PLAUSIBILITY GATE:
+            # A real human facecam in a 16:9 corner quadrant occupies between 2% and 32% skin area.
+            # Ratios > 35% are guaranteed to be game terrain (asphalt road, mud, sand, water)!
+            if mean_skin < 0.02 or mean_skin > 0.32:
+                logger.debug(f"Quadrant [{q_name}]: skin={mean_skin:.3f} rejected (outside 2%-32% face plausibility).")
+                continue
+
             score = (mean_skin * 100.0) + min(mean_motion * 1.5, 10.0)
 
-            # Penalty if motion is completely frozen (delta < 0.2 means static minimap/overlay)
-            if mean_motion < 0.2 and len(data["motion"]) > 0:
+            # Require non-static motion if multiple frames evaluated
+            if len(data["motion"]) > 1 and mean_motion < 0.3:
                 score *= 0.3
 
             logger.debug(f"Quadrant [{q_name}]: skin={mean_skin:.3f}, motion={mean_motion:.2f} -> score={score:.2f}")
@@ -202,25 +294,22 @@ class FacecamDetector:
                 best_quadrant = q_name
                 best_coords = data["coords"]
 
-        # Confidence Gate:
-        # Require at least 2.5% mean skin density or score >= 4.0 to qualify as a genuine webcam.
-        # This strictly prevents cropping empty background or static game UI!
         if best_score < 4.0 or best_quadrant is None:
-            logger.info(
-                f"No streamer webcam detected with sufficient confidence (best score: {best_score:.2f} in {best_quadrant}). "
-                "Omitting webcam badge for clean gameplay focus."
-            )
+            logger.info("No streamer facecam confirmed with high confidence. Omitting webcam for clean gameplay focus.")
             return {
                 "has_facecam": False,
-                "x": 0, "y": 0, "w": 0, "h": 0,
+                "x": 0,
+                "y": 0,
+                "w": 0,
+                "h": 0,
                 "quadrant": "none",
-                "confidence": round(best_score / 10.0, 2),
+                "confidence": 0.0,
             }
 
         qx, qy, qw, qh = best_coords
         confidence = min(0.95, round(best_score / 20.0, 2))
         logger.info(
-            f"Detected streamer webcam in [{best_quadrant}] at x={qx}, y={qy}, w={qw}, h={qh} "
+            f"[Skin Plausibility] Detected streamer webcam in [{best_quadrant}] at x={qx}, y={qy}, w={qw}, h={qh} "
             f"(Score: {best_score:.1f}, Confidence: {confidence:.2f})"
         )
 

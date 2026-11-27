@@ -140,8 +140,8 @@ def generate_karaoke_subtitles(
     highlight_color = style.get("primary_color", "&H0000FFFF")  # Default yellow
     base_color = style.get("secondary_color", "&H00FFFFFF")     # Default white
 
-    # Animation tag: scale bounce 112% for active word
-    pulse_tag = "{\\fscx112\\fscy112}"
+    # Animation tag: scale bounce 112% for active word (no outer braces to avoid nested tag syntax error)
+    pulse_tag = "\\fscx112\\fscy112"
 
     if isinstance(word_segments_or_text, list) and len(word_segments_or_text) > 0 and isinstance(word_segments_or_text[0], WordSegment):
         chunks = _chunk_word_segments(word_segments_or_text, max_chars=14, max_words=2)

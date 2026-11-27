@@ -8,6 +8,7 @@ from pathlib import Path
 
 from clipping.transformation.facecam_detector import FacecamDetector
 from clipping.transformation.video_processor import (
+    build_smart_split_filter_graph,
     build_floating_pip_filter_graph,
     build_split_screen_filter_graph,
     build_action_crop_filter_graph,
@@ -92,6 +93,30 @@ class TestSplitScreen(unittest.TestCase):
         self.assertIn("overlay=0:360[base]", graph)
         self.assertIn("[base]subtitles='subs.ass'", graph)
 
+    def test_smart_split_filter_syntax(self):
+        """Verifies 2-Tier Stack (OpusClip style) filter graph syntax."""
+        facecam_coords = {
+            "has_facecam": True,
+            "x": 1280,
+            "y": 0,
+            "w": 480,
+            "h": 360,
+            "quadrant": "top_right",
+            "confidence": 0.92,
+        }
+        graph = build_smart_split_filter_graph(
+            facecam_coords=facecam_coords,
+            escaped_sub="subs.ass",
+            clean_hook="GTA 6 EPIC MOMENT",
+            divider_color="0x00FFFF",
+        )
+        self.assertIn("vstack=inputs=2[stacked]", graph)
+        self.assertIn("crop=480:360:1280:0", graph)
+        self.assertIn("scale=1080:700", graph)
+        self.assertIn("scale=1080:1220", graph)
+        self.assertIn("drawbox=x=0:y=697:w=1080:h=6:color=0x00FFFF@0.95:t=fill", graph)
+        self.assertIn("subtitles='subs.ass'", graph)
+
     def test_legacy_split_screen_alias(self):
         """Verifies backwards compatibility wrapper build_split_screen_filter_graph."""
         facecam_coords = {"x": 1440, "y": 680, "w": 480, "h": 400}
@@ -102,9 +127,25 @@ class TestSplitScreen(unittest.TestCase):
             clean_hook="GTA 6 EPIC MOMENT",
             divider_color="0x00FFFF",
         )
-        self.assertIn("boxblur=25:5", graph)
-        self.assertIn("overlay=50:1420", graph)
+        self.assertIn("vstack=inputs=2[stacked]", graph)
+        self.assertIn("drawbox=x=0:y=697", graph)
         self.assertIn("subtitles='subs.ass'", graph)
+
+    def test_subtitles_no_nested_braces(self):
+        """Verifies that ASS karaoke subtitles do not produce invalid nested curly braces."""
+        prof = get_profile("game-gta6")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_ass = Path(tmpdir) / "no_nested.ass"
+            words = [
+                WordSegment(word="HELLO", start=0.1, end=0.5),
+                WordSegment(word="WORLD", start=0.6, end=1.0),
+            ]
+            generate_karaoke_subtitles(words, out_ass, total_duration=1.2, profile=prof)
+            content = out_ass.read_text(encoding="utf-8")
+            # Verify no nested braces like &{{
+            self.assertNotIn("&{", content)
+            self.assertNotIn("}{", content)
+            self.assertIn("\\fscx112\\fscy112", content)
 
     def test_action_crop_filter_syntax(self):
         vf = build_action_crop_filter_graph(

@@ -11,6 +11,7 @@ Renders broadcast-grade 1080x1920 60fps vertical Shorts with:
 
 import logging
 from pathlib import Path
+import re
 import subprocess
 from typing import Any, Dict, Optional, Union
 
@@ -113,6 +114,64 @@ def build_floating_pip_filter_graph(
     return fc_filter
 
 
+def build_smart_split_filter_graph(
+    facecam_coords: Dict[str, Any],
+    escaped_sub: str,
+    clean_hook: str,
+    divider_color: str = "0x00FFFF",  # Cyan accent for divider
+    top_h: int = 700,
+    bottom_h: int = 1220,
+) -> str:
+    """
+    Constructs an FFmpeg filter_complex graph for 2-Tier Stack (OpusClip/Twitch Clips style):
+      1. Top 36% (1080x700): Streamer reaction zoomed in via YuNet (clean, high-resolution, facial expressions).
+      2. Bottom 64% (1080x1220): Action gameplay, cropped to eliminate duplicate streamer webcam.
+      3. Seam: Neon divider bar + animated karaoke subtitles.
+      4. Zero-Cam Fallback (when has_facecam is False):
+         - Clean full 9:16 Action Crop (1080x1920).
+         - Guaranteed zero empty box artifacts!
+    """
+    has_cam = facecam_coords.get("has_facecam", False)
+    fx = facecam_coords.get("x", 0)
+    fy = facecam_coords.get("y", 0)
+    fw = facecam_coords.get("w", 0)
+    fh = facecam_coords.get("h", 0)
+
+    # Subtitle and hook overlay filter chain
+    sub_and_hook = (
+        f"subtitles='{escaped_sub}',"
+        f"drawtext=text='{clean_hook}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.7:boxborderw=18:"
+        f"x=(w-text_w)/2:y=180:enable='between(t,0,3.8)'[vout]"
+    )
+
+    if has_cam and fw > 0 and fh > 0:
+        cam_quad = facecam_coords.get("quadrant", "top_right")
+        x_expr = "0" if "right" in cam_quad else "(in_w-out_w)"
+
+        fc_filter = (
+            f"[0:v]split=2[cam_raw][game_raw];"
+            # Top pane: Streamer reaction
+            f"[cam_raw]crop={fw}:{fh}:{fx}:{fy},scale=1080:{top_h}:force_original_aspect_ratio=increase,"
+            f"crop=1080:{top_h},hue=s=1.06[top_pane];"
+            # Bottom pane: Action gameplay cropped away from streamer quadrant
+            f"[game_raw]crop=ih*(1080/{bottom_h}):ih:{x_expr}:(in_h-out_h)/2,"
+            f"scale=1080:{bottom_h},hue=h={COLOR_GRADE_HUE_SHIFT}:s={COLOR_GRADE_SAT_BOOST}[bottom_pane];"
+            # Stack vertically
+            f"[top_pane][bottom_pane]vstack=inputs=2[stacked];"
+            # Neon divider line
+            f"[stacked]drawbox=x=0:y={top_h-3}:w=1080:h=6:color={divider_color}@0.95:t=fill[divided];"
+            f"[divided]{sub_and_hook}"
+        )
+    else:
+        # Zero-cam fallback: Fullscreen 9:16 Action Framing
+        fc_filter = (
+            f"[0:v]crop=ih*(9/16):ih:(in_w-out_w)/2:(in_h-out_h)/2,scale=1080:1920,"
+            f"hue=h={COLOR_GRADE_HUE_SHIFT}:s={COLOR_GRADE_SAT_BOOST}[game_full];"
+            f"[game_full]{sub_and_hook}"
+        )
+    return fc_filter
+
+
 def build_split_screen_filter_graph(
     facecam_coords: Dict[str, Any],
     split_ratio: float,
@@ -121,17 +180,16 @@ def build_split_screen_filter_graph(
     divider_color: str = "0x00FFFF",  # Cyan accent for divider
 ) -> str:
     """
-    Backwards compatibility alias for build_floating_pip_filter_graph.
-    Directs split-screen rendering to the upgraded Floating Corner PiP layout.
+    Directs split-screen rendering to the upgraded 2-Tier Stack layout.
     """
     coords = dict(facecam_coords)
     if "has_facecam" not in coords:
         coords["has_facecam"] = coords.get("w", 0) > 0 and coords.get("h", 0) > 0
-    return build_floating_pip_filter_graph(
+    return build_smart_split_filter_graph(
         facecam_coords=coords,
         escaped_sub=escaped_sub,
         clean_hook=clean_hook,
-        border_color=divider_color,
+        divider_color=divider_color,
     )
 
 
@@ -170,7 +228,8 @@ def render_transformed_short(
     duration = min(clip.duration, float(prof.max_clip_duration))
     escaped_sub = escape_ffmpeg_path(subtitle_file)
 
-    clean_hook = hook_title.replace("'", "").replace('"', "").replace(":", " -")[:42]
+    clean_hook = re.sub(r"[^\w\s\-\!\?\,\.\'\"]", "", hook_title)
+    clean_hook = clean_hook.replace("'", "").replace('"', "").replace(":", " -").strip()[:42]
 
     # Audio filter chain: EBU R128 loudness normalization + vocal presence EQ to duck background music
     if prof.duck_background_music:
@@ -191,12 +250,20 @@ def render_transformed_short(
         # Detect facecam coordinates with multi-corner consensus
         detector = FacecamDetector()
         facecam_coords = detector.detect_facecam_crop(source_video, sample_time_sec=facecam_sample_t)
-        filter_complex = build_floating_pip_filter_graph(
-            facecam_coords=facecam_coords,
-            escaped_sub=escaped_sub,
-            clean_hook=clean_hook,
-            border_color="0x00FFFF" if prof.name == "game-gta6" else "0xFFFF00",
-        )
+        if prof.layout_mode == "floating_pip":
+            filter_complex = build_floating_pip_filter_graph(
+                facecam_coords=facecam_coords,
+                escaped_sub=escaped_sub,
+                clean_hook=clean_hook,
+                border_color="0x00FFFF" if prof.name == "game-gta6" else "0xFFFF00",
+            )
+        else:  # "smart_split_screen" (2-Tier OpusClip Stack)
+            filter_complex = build_smart_split_filter_graph(
+                facecam_coords=facecam_coords,
+                escaped_sub=escaped_sub,
+                clean_hook=clean_hook,
+                divider_color="0x00FFFF" if prof.name == "game-gta6" else "0xFFFF00",
+            )
 
         cmd = [
             "ffmpeg", "-y",
