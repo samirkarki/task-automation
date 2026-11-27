@@ -121,6 +121,7 @@ def build_smart_split_filter_graph(
     divider_color: str = "0x00FFFF",  # Cyan accent for divider
     top_h: int = 700,
     bottom_h: int = 1220,
+    badge_path: Optional[str] = None,  # attribution badge PNG for no-cam branch
 ) -> str:
     """
     Constructs an FFmpeg filter_complex graph for 2-Tier Stack (OpusClip/Twitch Clips style):
@@ -164,11 +165,27 @@ def build_smart_split_filter_graph(
         )
     else:
         # Zero-cam fallback: Fullscreen 9:16 Action Framing
-        fc_filter = (
+        game_full_filter = (
             f"[0:v]crop=ih*(9/16):ih:(in_w-out_w)/2:(in_h-out_h)/2,scale=1080:1920,"
             f"hue=h={COLOR_GRADE_HUE_SHIFT}:s={COLOR_GRADE_SAT_BOOST}[game_full];"
-            f"[game_full]{sub_and_hook}"
         )
+        # Optional attribution badge overlay (corner badge when no facecam)
+        if badge_path and Path(badge_path).exists():
+            escaped_badge = str(Path(badge_path).resolve()).replace("\\", "/").replace(":", "\\:")
+            fc_filter = (
+                game_full_filter
+                + f"[game_full]subtitles='{escaped_sub}',"
+                f"drawtext=text='{clean_hook}':fontcolor=white:fontsize=48:box=1"
+                f":boxcolor=black@0.7:boxborderw=18:"
+                f"x=(w-text_w)/2:y=180:enable='between(t,0,3.8)'[hook_layer];"
+                f"movie='{escaped_badge}'[badge];"
+                f"[hook_layer][badge]overlay=W-w-30:H-h-30[vout]"
+            )
+        else:
+            fc_filter = (
+                game_full_filter
+                + f"[game_full]{sub_and_hook}"
+            )
     return fc_filter
 
 
@@ -258,11 +275,28 @@ def render_transformed_short(
                 border_color="0x00FFFF" if prof.name == "game-gta6" else "0xFFFF00",
             )
         else:  # "smart_split_screen" (2-Tier OpusClip Stack)
+            # Build attribution badge for no-facecam branch if enabled
+            badge_png: Optional[str] = None
+            has_cam = facecam_coords.get("has_facecam", False)
+            if not has_cam and getattr(prof, "show_attribution_badge", True):
+                try:
+                    from clipping.transformation.attribution_badge import generate_attribution_badge
+                    badge_out = output_path.parent / f"badge_{output_path.stem}.png"
+                    badge_png = generate_attribution_badge(
+                        channel_name=getattr(prof, "channel_brand_name", "ClipBot"),
+                        avatar_path=getattr(prof, "attribution_avatar_path", None),
+                        output_path=str(badge_out),
+                        subtitle="Original Streamer",
+                    )
+                except Exception as badge_err:
+                    logger.debug(f"Badge generation skipped: {badge_err}")
+
             filter_complex = build_smart_split_filter_graph(
                 facecam_coords=facecam_coords,
                 escaped_sub=escaped_sub,
                 clean_hook=clean_hook,
                 divider_color="0x00FFFF" if prof.name == "game-gta6" else "0xFFFF00",
+                badge_path=badge_png,
             )
 
         cmd = [

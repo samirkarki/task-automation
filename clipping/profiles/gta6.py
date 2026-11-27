@@ -64,4 +64,10 @@ Content analyzed and shared under transformative fair-use commentary.
 
 🔔 Subscribe for daily GTA 6 gameplay & stream highlights!""",
     estimated_rpm=0.45,
+    # Long-form compilation
+    output_format="both",           # produce Shorts AND a 10-min compilation each run
+    longform_duration=600.0,        # 10 minutes (crosses 8-min mid-roll threshold)
+    channel_brand_name="ClipBot",   # TODO: replace with your real channel name
+    show_attribution_badge=True,
+    mute_game_music=True,           # suppress in-game music, use royalty-free track
 )

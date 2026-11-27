@@ -169,7 +169,7 @@ class FacecamDetector:
 
             try:
                 detector = self._cv2.FaceDetectorYN.create(
-                    str(self._yunet_path), "", (ref_w, ref_h), score_threshold=0.55
+                    str(self._yunet_path), "", (ref_w, ref_h), score_threshold=0.75
                 )
 
                 for frame in frames:
@@ -195,7 +195,7 @@ class FacecamDetector:
                                 elif cx < fw * 0.42:
                                     quad = "bottom_left"
 
-                            if quad and conf >= 0.60:
+                            if quad and conf >= 0.75 and f_w >= 50:
                                 corner_votes[quad].append(conf)
 
                 # Check if any corner quadrant has persistent facial detections
@@ -204,13 +204,13 @@ class FacecamDetector:
                 max_votes = 0
 
                 for quad, confs in corner_votes.items():
-                    if len(confs) > max_votes and np.mean(confs) >= 0.60:
+                    if len(confs) > max_votes and np.mean(confs) >= 0.75:
                         max_votes = len(confs)
                         best_quadrant = quad
                         best_conf = float(np.mean(confs))
 
                 # Require at least 2 detections (or 1 if only 1 frame was provided)
-                min_required = 1 if len(frames) <= 2 else 2
+                min_required = 1 if len(frames) <= 2 else 3
                 if best_quadrant and max_votes >= min_required:
                     qw = int(ref_w * 0.32)
                     qh = int(ref_h * 0.36)
@@ -277,7 +277,7 @@ class FacecamDetector:
             # CRITICAL PLAUSIBILITY GATE:
             # A real human facecam in a 16:9 corner quadrant occupies between 2% and 32% skin area.
             # Ratios > 35% are guaranteed to be game terrain (asphalt road, mud, sand, water)!
-            if mean_skin < 0.02 or mean_skin > 0.32:
+            if mean_skin < 0.02 or mean_skin > 0.25:
                 logger.debug(f"Quadrant [{q_name}]: skin={mean_skin:.3f} rejected (outside 2%-32% face plausibility).")
                 continue
 
@@ -294,7 +294,7 @@ class FacecamDetector:
                 best_quadrant = q_name
                 best_coords = data["coords"]
 
-        if best_score < 4.0 or best_quadrant is None:
+        if best_score < 6.0 or best_quadrant is None:
             logger.info("No streamer facecam confirmed with high confidence. Omitting webcam for clean gameplay focus.")
             return {
                 "has_facecam": False,

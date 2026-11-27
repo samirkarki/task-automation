@@ -141,12 +141,18 @@ def run_pipeline(
     audio_mode: str = "original",
     voice: str = "andrew",
     profile_name: Optional[str] = None,
+    output_format_override: Optional[str] = None,
 ) -> List[str]:
     """
     Executes the multi-profile autonomous clipping and publishing pipeline
     using targeted section slicing (no full-video 9GB downloads).
     """
     prof: ClipProfile = get_profile(profile_name)
+
+    # Allow CLI to override profile output format
+    if output_format_override:
+        import dataclasses
+        prof = dataclasses.replace(prof, output_format=output_format_override)
 
     logger.info("=================================================================")
     logger.info(f"STARTING AUTONOMOUS SHORTS PIPELINE: [{prof.display_name.upper()}]")
@@ -235,6 +241,12 @@ def run_pipeline(
     # Step 5: Process Top N Candidate Moments with Targeted Section Slicing
     logger.info(f"[5/8] Processing top {clips_to_generate} unclipped moment(s) with targeted section slicing...")
     processed_count = 0
+
+    # Long-form tracking — raw 16:9 clips and their scores
+    rendered_short_paths: List[Path] = []
+    rendered_short_raw_paths: List[Path] = []
+    rendered_clip_scores: List[float] = []
+    subtitle_paths: List[Path] = []
 
     for seed_idx, seed in enumerate(unclipped_seeds):
         if processed_count >= clips_to_generate:
@@ -350,6 +362,12 @@ def run_pipeline(
             if yt_url:
                 published_urls.append(yt_url)
 
+            # Track for long-form compilation
+            rendered_short_paths.append(short_path)
+            rendered_short_raw_paths.append(video_slice_path)
+            rendered_clip_scores.append(clip.heatmap_score)
+            subtitle_paths.append(sub_path)
+
             # Record in SQLite database with interval tracking
             db.insert_clip(
                 video_id=vid_id,
@@ -369,13 +387,104 @@ def run_pipeline(
         except Exception as e:
             logger.error(f"Error processing clip seed at {t_seed:.1f}s: {e}", exc_info=True)
         finally:
-            # Clean up temporary sliced files
-            for p in [audio_slice_path, OUTPUT_DIR / f"{prefix}_video.mp4"]:
+            # Clean up audio slice always; keep raw video slice if long-form enabled
+            output_format = getattr(prof, "output_format", "shorts")
+            keep_video_slice = output_format in ("longform", "both")
+            files_to_clean = [audio_slice_path]
+            if not keep_video_slice:
+                files_to_clean.append(OUTPUT_DIR / f"{prefix}_video.mp4")
+            for p in files_to_clean:
                 if p and p.exists():
                     try:
                         p.unlink()
                     except OSError:
                         pass
+
+    # --- Long-Form Compilation (if profile output_format in "longform" | "both") ---
+    output_format = getattr(prof, "output_format", "shorts")
+    if output_format in ("longform", "both") and len(rendered_short_raw_paths) >= 2:
+        logger.info(
+            f"[Long-Form] Assembling {len(rendered_short_raw_paths)}-clip compilation "
+            f"(target: {getattr(prof, 'longform_duration', 600.0):.0f}s)..."
+        )
+        try:
+            from clipping.transformation.bumper_renderer import render_bumper
+            from clipping.transformation.longform_renderer import render_longform_compilation
+
+            brand_name = getattr(prof, "channel_brand_name", "ClipBot")
+            avatar_path = getattr(prof, "attribution_avatar_path", None)
+
+            intro_path = OUTPUT_DIR / "bumper_intro.mp4"
+            outro_path = OUTPUT_DIR / "bumper_outro.mp4"
+
+            render_bumper(
+                channel_brand_name=brand_name,
+                game_title=prof.display_name,
+                output_path=intro_path,
+                avatar_path=avatar_path,
+                episode_label=f"Best Moments \u2014 {datetime.now().strftime('%b %Y')}",
+            )
+            render_bumper(
+                channel_brand_name=brand_name,
+                game_title=prof.display_name,
+                output_path=outro_path,
+                avatar_path=avatar_path,
+                episode_label="Like & Subscribe for more!",
+            )
+
+            longform_path = OUTPUT_DIR / "compilation_longform.mp4"
+            result = render_longform_compilation(
+                clip_paths=rendered_short_raw_paths,
+                clip_scores=rendered_clip_scores,
+                output_path=longform_path,
+                intro_bumper_path=intro_path if intro_path.exists() else None,
+                outro_bumper_path=outro_path if outro_path.exists() else None,
+                target_duration=getattr(prof, "longform_duration", 600.0),
+                channel_brand_name=brand_name,
+                game_title=prof.display_name,
+                accent_color="0x00FFFF" if prof.name == "game-gta6" else "0xFFFF00",
+                mute_game_music=getattr(prof, "mute_game_music", True),
+            )
+
+            if result and result.exists():
+                logger.info(f"Long-form compilation ready: {result}")
+                if not dry_run:
+                    longform_meta = generate_metadata(
+                        ClipCandidate(
+                            source_url=target_video.url,
+                            source_channel=target_video.channel,
+                            source_title=f"{prof.display_name} Best Moments Compilation",
+                            start_sec=0.0,
+                            end_sec=getattr(prof, "longform_duration", 600.0),
+                            duration=getattr(prof, "longform_duration", 600.0),
+                            heatmap_score=0.9,
+                            hook_sentence=f"{prof.display_name} Best Moments \U0001f525",
+                            commentary_angle="Best moments compilation",
+                            transcript_segment="",
+                            word_segments=[],
+                            is_pre_cut=True,
+                        ),
+                        "",
+                        profile=prof,
+                    )
+                    publish_to_all_platforms(
+                        video_path=result,
+                        metadata=longform_meta,
+                        ab_variant="A",
+                        privacy=privacy,
+                        dry_run=dry_run,
+                    )
+
+            # Clean up raw video slices now that long-form is assembled
+            for raw_p in rendered_short_raw_paths:
+                if raw_p and raw_p.exists():
+                    try:
+                        raw_p.unlink()
+                    except OSError:
+                        pass
+
+        except Exception as lf_err:
+            logger.error(f"Long-form compilation failed: {lf_err}", exc_info=True)
 
     # Mark video in compliance filter with count of generated clips
     compliance.register_processed(target_video.video_id, processed_count)

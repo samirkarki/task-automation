@@ -53,6 +53,18 @@ def main():
     parser.add_argument("--privacy", type=str, default="public", choices=["public", "unlisted", "private"], help="YouTube upload privacy status (default: public).")
     parser.add_argument("--audio-mode", type=str, default="original", choices=["original", "soothing"], help="Audio mode: 'original' (keeps real speaker's human voice) or 'soothing' (uses natural human voiceover).")
     parser.add_argument("--voice", type=str, default="andrew", choices=["andrew", "brian", "christopher", "ava", "ryan"], help="Soothing human voice preset (default: andrew).")
+    parser.add_argument(
+        "--output-format",
+        type=str,
+        default=None,
+        choices=["shorts", "longform", "both"],
+        help=(
+            "Override profile output format: "
+            "'shorts' (Shorts only), "
+            "'longform' (10-min compilation only), "
+            "'both' (Shorts + compilation, default for GTA6)."
+        ),
+    )
     parser.add_argument("--report", action="store_true", help="Generate and print weekly performance audit report.")
     parser.add_argument("--optimize", action="store_true", help="Run strategy optimizer feedback loop.")
     parser.add_argument("--poll", action="store_true", help="Poll YouTube Data API for live statistics.")
@@ -109,6 +121,7 @@ def main():
         audio_mode=args.audio_mode,
         voice=args.voice,
         profile_name=args.profile,
+        output_format_override=args.output_format,
     )
 
 
